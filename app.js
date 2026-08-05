@@ -21,6 +21,7 @@ const ZIEL_GESAMT = 150;
 const ZIEL_MIT_STANDORT = 100;
 const DUPLIKAT_RADIUS_M = 30;
 const UNDO_FRIST_MS = 5000;
+const CLEAR_UNDO_MS = 9000;
 
 const STADTBEZIRKE = [
   'Altstadt/Lehel',
@@ -50,8 +51,14 @@ const BEZIRK_MAPPING = [
 
 // ---------- IndexedDB ----------
 
+// Eine einzige, wiederverwendete Verbindung statt einer pro Operation --
+// sonst sammeln sich offene IDBDatabase-Handles an, die spaetere
+// Schema-Upgrades blockieren wuerden.
+let dbPromise = null;
+
 function openDb() {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -59,9 +66,25 @@ function openDb() {
         db.createObjectStore(STORE, { keyPath: 'id' });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Verbindung freigeben, sobald eine andere Instanz ein Upgrade will,
+      // und den Cache verwerfen, damit der naechste Zugriff neu oeffnet.
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      db.onclose = () => {
+        dbPromise = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => {
+      dbPromise = null; // Fehlschlag nicht dauerhaft festschreiben
+      reject(req.error);
+    };
   });
+  return dbPromise;
 }
 
 async function addEntry(entry) {
@@ -186,6 +209,7 @@ const progressSummary = document.getElementById('progress-summary');
 const headerProgress = document.getElementById('header-progress');
 const exportButton = document.getElementById('export-button');
 const clearButton = document.getElementById('clear-button');
+const storageWarning = document.getElementById('storage-warning');
 const toast = document.getElementById('toast');
 
 let currentPosition = null; // { lat, lon }
@@ -264,11 +288,25 @@ function resetAllChips() {
 
 // ---------- Toast (mit optionaler Undo-Aktion) ----------
 
-function showToast(message, action) {
+/**
+ * options: { action: { label, onClick }, durationMs, variant: 'error' }
+ *
+ * Wichtig bei Undo-Toasts: die Standarddauer liegt bewusst UNTER
+ * UNDO_FRIST_MS. Stuende der Toast laenger als die Frist, waere der
+ * "Rueckgaengig"-Knopf noch sichtbar, nachdem der Eintrag bereits
+ * endgueltig geloescht wurde -- ein Tap darauf liefe dann wirkungslos ins
+ * Leere. Wer eine eigene Dauer setzt, muss selbst sicherstellen, dass die
+ * Aktion so lange gueltig bleibt.
+ */
+function showToast(message, options = {}) {
+  const { action, durationMs, variant } = options;
   toast.innerHTML = '';
+  toast.classList.toggle('toast-error', variant === 'error');
+
   const span = document.createElement('span');
   span.textContent = message;
   toast.appendChild(span);
+
   if (action) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -280,10 +318,12 @@ function showToast(message, action) {
     });
     toast.appendChild(btn);
   }
+
   toast.hidden = false;
   requestAnimationFrame(() => toast.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToastNow, action ? UNDO_FRIST_MS + 800 : 2200);
+  const dauer = durationMs ?? (action ? UNDO_FRIST_MS - 500 : 2200);
+  toastTimer = setTimeout(hideToastNow, dauer);
 }
 
 function hideToastNow() {
@@ -307,6 +347,27 @@ function init() {
   setupChipGroups();
   renderList();
   registerServiceWorker();
+  ensurePersistentStorage();
+}
+
+// Ohne "persistent storage" darf der Browser die IndexedDB bei
+// Speicherdruck jederzeit raeumen -- bei einem Werkzeug, das ueber Monate
+// 150 Beobachtungen sammelt, waere das der Totalverlust. Die Anfrage wird
+// je nach Browser still gewaehrt (Chrome, heuristisch) oder abgelehnt;
+// bleibt sie aus, weisen wir sichtbar auf regelmaessigen Export hin.
+async function ensurePersistentStorage() {
+  if (!navigator.storage || !navigator.storage.persist) return;
+  try {
+    const schonPersistent = await navigator.storage.persisted();
+    const persistent = schonPersistent || (await navigator.storage.persist());
+    if (!persistent) {
+      storageWarning.hidden = false;
+      storageWarning.textContent =
+        '⚠ Dieser Browser sichert die Daten nicht dauerhaft — sie können bei Speicherdruck gelöscht werden. Regelmäßig exportieren.';
+    }
+  } catch (err) {
+    console.warn('Persistenz-Anfrage fehlgeschlagen.', err);
+  }
 }
 
 fotoInput.addEventListener('change', () => {
@@ -500,7 +561,15 @@ function renderNearby(results) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'nearby-item';
-    btn.innerHTML = `<strong>${r.name}</strong><span>${r.kategorie ? r.kategorie + ' · ' : ''}${Math.round(r.dist)} m</span>`;
+    // textContent statt innerHTML: Namen und Tags kommen aus OSM, sind also
+    // von Dritten frei editierbar. Als Markup interpretiert koennte ein
+    // praeparierter Ortsname Code in diesem Origin ausfuehren -- und in
+    // diesem Origin liegen saemtliche erfassten Beobachtungen.
+    const nameEl = document.createElement('strong');
+    nameEl.textContent = r.name;
+    const metaEl = document.createElement('span');
+    metaEl.textContent = `${r.kategorie ? r.kategorie + ' · ' : ''}${Math.round(r.dist)} m`;
+    btn.append(nameEl, metaEl);
     btn.addEventListener('click', () => {
       ortInput.value = r.name;
       if (r.adresse) adresseInput.value = r.adresse;
@@ -551,7 +620,23 @@ form.addEventListener('submit', async (event) => {
     fotoType: currentFotoBlob ? currentFotoBlob.type : '',
   };
 
-  await addEntry(entry);
+  try {
+    await addEntry(entry);
+  } catch (err) {
+    // Haeufigster Fall: QuotaExceededError, wenn der Geraetespeicher voll
+    // ist (Fotos!). Ohne diese Behandlung braeche der Handler still ab --
+    // das Formular bliebe stehen, ohne dass klar waere, dass NICHTS
+    // gespeichert wurde.
+    console.error('Speichern fehlgeschlagen.', err);
+    const voll = err && err.name === 'QuotaExceededError';
+    formError.textContent = voll
+      ? 'Speicher voll — nichts gespeichert. Bitte erst exportieren und dann Einträge löschen (ggf. ohne Foto erneut versuchen).'
+      : `Speichern fehlgeschlagen (${err && err.name ? err.name : 'unbekannter Fehler'}). Eintrag wurde NICHT gespeichert.`;
+    formError.hidden = false;
+    formError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showToast('Nicht gespeichert', { variant: 'error', durationMs: 4000 });
+    return;
+  }
 
   form.reset();
   datumInput.value = todayIso();
@@ -572,7 +657,15 @@ form.addEventListener('submit', async (event) => {
 
 async function renderList() {
   const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
-  entries.sort((a, b) => (a.datum < b.datum ? 1 : -1));
+  // Neueste zuerst. Uhrzeit muss mit rein, sonst ist die Reihenfolge
+  // innerhalb eines Erhebungstages -- also im Normalfall -- willkuerlich.
+  // Gleichstand bricht die id auf, die mit Date.now() beginnt.
+  entries.sort((a, b) => {
+    const ka = `${a.datum} ${a.uhrzeit || ''}`;
+    const kb = `${b.datum} ${b.uhrzeit || ''}`;
+    if (ka !== kb) return ka < kb ? 1 : -1;
+    return String(b.id).localeCompare(String(a.id));
+  });
 
   const gesamt = entries.filter((e) => e.quelle === 'field_survey').length;
   const mitStandort = entries.filter(
@@ -655,13 +748,24 @@ function softDeleteEntry(entry) {
   pendingDeletes.set(entry.id, timeoutId);
   renderList();
   showToast(`Gelöscht: „${entry.ort_name}“`, {
-    label: 'Rückgängig',
-    onClick: () => {
-      clearTimeout(pendingDeletes.get(entry.id));
-      pendingDeletes.delete(entry.id);
-      renderList();
+    action: {
+      label: 'Rückgängig',
+      onClick: () => {
+        clearTimeout(pendingDeletes.get(entry.id));
+        pendingDeletes.delete(entry.id);
+        renderList();
+      },
     },
   });
+}
+
+// Bricht alle schwebenden Einzel-Loeschungen ab, ohne sie auszufuehren.
+// Muss vor jedem Massen-Eingriff laufen: ein bloszes pendingDeletes.clear()
+// wuerde die Timer weiterlaufen lassen, und ein spaeter zurueckgeholter
+// Eintrag waere dann Sekunden danach wieder verschwunden.
+function cancelPendingDeletes() {
+  for (const timeoutId of pendingDeletes.values()) clearTimeout(timeoutId);
+  pendingDeletes.clear();
 }
 
 exportButton.addEventListener('click', async () => {
@@ -694,7 +798,10 @@ exportButton.addEventListener('click', async () => {
     lines.push(header.map((key) => csvEscape(e[key])).join(';'));
   }
   const csvText = lines.join('\n') + '\n';
-  const csvBlob = new Blob([csvText], { type: 'text/csv' });
+  // BOM voran, sonst zeigt Excel die Umlaute als Krautsalat. Wer die Zeilen
+  // in docs/erhebung/beobachtungen.csv kopiert, bekommt es nicht mit --
+  // erhebung-fortschritt.mjs im Hauptrepo entfernt es zur Sicherheit.
+  const csvBlob = new Blob(['\uFEFF' + csvText], { type: 'text/csv;charset=utf-8' });
   const csvFile = new File([csvBlob], `beobachtungen-${todayIso()}.csv`, { type: 'text/csv' });
 
   const photoFiles = entries
@@ -751,14 +858,21 @@ clearButton.addEventListener('click', async () => {
 
   const snapshot = await getAllEntries();
   if (snapshot.length === 0) return;
+  // Erst die schwebenden Einzel-Timer entschaerfen, dann loeschen -- sonst
+  // wuerde ein zurueckgeholter Eintrag Sekunden spaeter erneut verschwinden.
+  cancelPendingDeletes();
   await clearAllEntries();
-  pendingDeletes.clear();
   await renderList();
   showToast(`${snapshot.length} ${snapshot.length === 1 ? 'Eintrag' : 'Einträge'} gelöscht`, {
-    label: 'Rückgängig',
-    onClick: async () => {
-      for (const entry of snapshot) await addEntry(entry);
-      await renderList();
+    // Laenger als die Einzel-Undo-Frist: hier haengt nichts an einem Timer,
+    // der Snapshot bleibt gueltig, solange der Toast steht.
+    durationMs: CLEAR_UNDO_MS,
+    action: {
+      label: 'Rückgängig',
+      onClick: async () => {
+        for (const entry of snapshot) await addEntry(entry);
+        await renderList();
+      },
     },
   });
 });

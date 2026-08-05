@@ -426,3 +426,7 @@ button:active {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+.toast.toast-error {
+  background: var(--danger);
+}

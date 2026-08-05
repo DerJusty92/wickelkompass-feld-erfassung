@@ -1,3 +1,6 @@
+<!doctype html>
+<html lang="de">
+<head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#2563eb" />
@@ -9,6 +12,8 @@
 <link rel="icon" href="./icon-192.png" />
 <link rel="stylesheet" href="./style.css" />
 <title>Wickelkompass — Felderfassung</title>
+</head>
+<body>
 
 <header class="app-header">
   <div class="app-header-row">
@@ -183,6 +188,7 @@
       (Mail, WhatsApp, …). Andernfalls werden die Dateien heruntergeladen, zum
       manuellen Anhängen.
     </p>
+    <p id="storage-warning" class="dup-warning" hidden></p>
     <button type="button" id="export-button" class="btn-primary btn-pill">📤 Exportieren / Teilen</button>
     <button type="button" id="clear-button" class="btn-danger">Alle Einträge löschen</button>
   </section>
@@ -199,3 +205,5 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="./app.js" defer></script>
+</body>
+</html>
