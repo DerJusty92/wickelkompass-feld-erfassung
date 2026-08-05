@@ -37,7 +37,11 @@ Verlässt das Gerät nur beim expliziten Export.
 
 ## Live
 
-<!-- URL wird nach dem ersten Pages-Deploy ergänzt -->
+**https://derjusty92.github.io/wickelkompass-feld-erfassung/**
+
+Auf dem Handy öffnen und über das Browser-Menü „Zum Startbildschirm
+hinzufügen" installieren (Android: Chrome-Menü → App installieren; iOS:
+Safari → Teilen → Zum Home-Bildschirm).
 
 ## Lokal testen
 
