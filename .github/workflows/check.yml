@@ -1,0 +1,53 @@
+name: check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Kein Build, keine Abhaengigkeiten -- die App ist reines Vanilla-JS.
+      # Der Parser faengt genau das ab, was hier realistisch passiert:
+      # Tippfehler, die sonst erst auf dem Handy als weisse Seite auffallen.
+      - name: JS-Syntax pruefen
+        run: |
+          for f in app.js service-worker.js dev-server.mjs generate-icons.mjs; do
+            node --check "$f"
+            echo "OK: $f"
+          done
+
+      # Die Cache-Version muss bei jeder Aenderung am App-Shell hochgezaehlt
+      # werden, sonst behalten installierte Instanzen die alte Fassung.
+      - name: Service-Worker-Cache-Version vorhanden
+        run: grep -qE "^const CACHE = 'wk-feld-erfassung-v[0-9]+';$" service-worker.js
+
+      # Alle im Service Worker gelisteten Assets muessen es auch geben --
+      # ein Tippfehler dort laesst die Installation fehlschlagen und die App
+      # startet offline nicht mehr.
+      - name: Gecachte Assets existieren
+        run: |
+          node -e "
+            const fs = require('fs');
+            const sw = fs.readFileSync('service-worker.js', 'utf8');
+            const block = sw.match(/const ASSETS = \[(.*?)\];/s);
+            if (!block) { console.error('ASSETS-Liste nicht gefunden'); process.exit(1); }
+            const dateien = [...block[1].matchAll(/'\.\/([^']+)'/g)].map(m => m[1]);
+            let fehler = 0;
+            for (const d of dateien) {
+              if (fs.existsSync(d)) { console.log('OK: ' + d); }
+              else { console.error('FEHLT: ' + d); fehler++; }
+            }
+            process.exit(fehler ? 1 : 0);
+          "
