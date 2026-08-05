@@ -1098,12 +1098,21 @@ async function renderList() {
     return String(b.id).localeCompare(String(a.id));
   });
 
-  const gesamt = entries.filter((e) => e.quelle === 'field_survey').length;
-  const mitStandort = entries.filter(
-    (e) => e.quelle === 'field_survey' && e.changing_table_location
-  ).length;
-  progressSummary.textContent = `${gesamt} gespeichert (${mitStandort} mit WC-Standort) — Ziel: ${ZIEL_GESAMT} / ${ZIEL_MIT_STANDORT}`;
-  headerProgress.textContent = `${gesamt}/${ZIEL_GESAMT}`;
+  const feldSurvey = entries.filter((e) => e.quelle === 'field_survey');
+  const gesamt = feldSurvey.length;
+  const mitStandort = feldSurvey.filter((e) => e.changing_table_location).length;
+  const negativbefunde = feldSurvey.filter((e) => e.changing_table === 'no').length;
+
+  // Kernziel ist die Zahl MIT WC-Standort, nicht die Gesamtzahl -- sie
+  // traegt das Alleinstellungsmerkmal. Negativbefunde haben eigenen Wert
+  // ("hier ist keiner" zeigt sonst niemand) und werden deshalb getrennt
+  // ausgewiesen statt gegen das Kernziel gerechnet.
+  headerProgress.textContent = `${mitStandort}/${ZIEL_MIT_STANDORT}`;
+  headerProgress.title = `${mitStandort} von ${ZIEL_MIT_STANDORT} Beobachtungen mit WC-Standort (Kernziel)`;
+  progressSummary.textContent =
+    `${mitStandort} / ${ZIEL_MIT_STANDORT} mit WC-Standort (Kernziel) · ` +
+    `${gesamt} / ${ZIEL_GESAMT} Beobachtungen · ` +
+    `${negativbefunde} ohne Wickeltisch`;
   updateExportReminder(entries);
   renderAbdeckung(entries);
 
