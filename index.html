@@ -1,0 +1,132 @@
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#2563eb" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="WK Erfassung" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<link rel="icon" href="./icon-192.png" />
+<link rel="stylesheet" href="./style.css" />
+<title>Wickelkompass — Felderfassung</title>
+
+<header class="app-header">
+  <h1>Wickelkompass — Felderfassung</h1>
+  <p class="subtitle">Privates Erfassungstool für die Wickel-Safari. Daten bleiben auf diesem Gerät.</p>
+</header>
+
+<main>
+  <section class="card" aria-labelledby="form-heading">
+    <h2 id="form-heading">Neue Beobachtung</h2>
+    <form id="entry-form" novalidate>
+      <div class="field">
+        <label for="datum">Datum *</label>
+        <input type="date" id="datum" name="datum" required />
+      </div>
+
+      <div class="field">
+        <label for="ort_name">Ort (Name, bei Ketten mit Filiale) *</label>
+        <input type="text" id="ort_name" name="ort_name" required autocomplete="off" />
+      </div>
+
+      <div class="field">
+        <label for="adresse">Adresse</label>
+        <input type="text" id="adresse" name="adresse" autocomplete="off" placeholder="Straße, Hausnummer" />
+      </div>
+
+      <div class="field gps-field">
+        <label>Standort</label>
+        <button type="button" id="gps-button" class="btn-secondary">📍 GPS erfassen</button>
+        <p id="gps-status" class="hint" aria-live="polite">Noch kein Standort erfasst.</p>
+      </div>
+
+      <div class="field">
+        <label for="stadtbezirk">Stadtbezirk</label>
+        <select id="stadtbezirk" name="stadtbezirk">
+          <option value="">— auswählen —</option>
+        </select>
+        <p id="bezirk-vorschlag" class="hint" hidden></p>
+      </div>
+
+      <div class="field">
+        <label for="changing_table">Wickeltisch vorhanden? *</label>
+        <select id="changing_table" name="changing_table" required>
+          <option value="">— auswählen —</option>
+          <option value="yes">Ja</option>
+          <option value="no">Nein (nachweislich keiner)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="changing_table_location">WC-Standort (nur wenn selbst gesehen)</label>
+        <select id="changing_table_location" name="changing_table_location" disabled>
+          <option value="">— unbekannt / nicht erfasst —</option>
+          <option value="female_toilet">Nur Damen-WC</option>
+          <option value="male_toilet">Nur Herren-WC</option>
+          <option value="unisex">Unisex / in beiden</option>
+          <option value="dedicated_room">Eigener Wickelraum</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="stroller_access">Erreichbarkeit mit Kinderwagen *</label>
+        <select id="stroller_access" name="stroller_access" required>
+          <option value="">— auswählen —</option>
+          <option value="yes">Stufenlos</option>
+          <option value="limited">Eingeschränkt (Hindernis)</option>
+          <option value="no">Nicht erreichbar</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="foto">Foto (nur als Gedächtnisstütze, bleibt lokal)</label>
+        <input type="file" id="foto" name="foto" accept="image/*" capture="environment" />
+        <img id="foto-preview" class="foto-preview" hidden alt="Vorschau des aufgenommenen Fotos" />
+      </div>
+
+      <div class="field">
+        <label for="notiz">Notiz</label>
+        <textarea id="notiz" name="notiz" rows="3" placeholder="Zugang, Öffnungszeiten, Zustand, Wegbeschreibung …"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="quelle">Quelle *</label>
+        <select id="quelle" name="quelle" required>
+          <option value="field_survey">Selbst gesehen (field_survey)</option>
+          <option value="operator_reply">Auskunft vom Personal (operator_reply)</option>
+        </select>
+        <p class="hint">Zählt nur „field_survey“ in die 150er-Zielgröße.</p>
+      </div>
+
+      <button type="submit" class="btn-primary">Speichern</button>
+    </form>
+  </section>
+
+  <section class="card" aria-labelledby="list-heading">
+    <h2 id="list-heading">Gespeicherte Beobachtungen</h2>
+    <p id="progress-summary" class="hint">0 gespeichert (0 mit WC-Standort) — Ziel: 150 / 100</p>
+    <ul id="entries-list" class="entries-list"></ul>
+  </section>
+
+  <section class="card" aria-labelledby="export-heading">
+    <h2 id="export-heading">Exportieren</h2>
+    <p class="hint">
+      Erstellt eine CSV (kompatibel zu <code>docs/erhebung/beobachtungen.csv</code>) plus
+      angehängte Fotos und öffnet — falls verfügbar — das Teilen-Menü des Geräts
+      (Mail, WhatsApp, …). Andernfalls werden die Dateien heruntergeladen, zum
+      manuellen Anhängen.
+    </p>
+    <button type="button" id="export-button" class="btn-primary">📤 Exportieren / Teilen</button>
+    <button type="button" id="clear-button" class="btn-danger">Alle Einträge löschen</button>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <p>
+    Alles bleibt lokal auf diesem Gerät (IndexedDB), außer beim expliziten Export
+    oder dem optionalen GPS-Stadtbezirk-Abgleich (nur Koordinaten, an
+    OpenStreetMap Nominatim). Kein automatischer Versand.
+  </p>
+</footer>
+
+<script src="./app.js" defer></script>
