@@ -138,30 +138,108 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-// ---------- UI ----------
+// ---------- UI-Grundelemente ----------
 
 const form = document.getElementById('entry-form');
+const formError = document.getElementById('form-error');
 const datumInput = document.getElementById('datum');
 const ortInput = document.getElementById('ort_name');
 const adresseInput = document.getElementById('adresse');
 const bezirkSelect = document.getElementById('stadtbezirk');
 const bezirkVorschlag = document.getElementById('bezirk-vorschlag');
-const tableSelect = document.getElementById('changing_table');
-const locationSelect = document.getElementById('changing_table_location');
-const strollerSelect = document.getElementById('stroller_access');
 const fotoInput = document.getElementById('foto');
 const fotoPreview = document.getElementById('foto-preview');
 const notizInput = document.getElementById('notiz');
-const quelleSelect = document.getElementById('quelle');
 const gpsButton = document.getElementById('gps-button');
 const gpsStatus = document.getElementById('gps-status');
+const gpsMapWrap = document.getElementById('gps-map-wrap');
+const gpsMapFrame = document.getElementById('gps-map');
+const gpsMapLink = document.getElementById('gps-map-link');
 const entriesList = document.getElementById('entries-list');
 const progressSummary = document.getElementById('progress-summary');
+const headerProgress = document.getElementById('header-progress');
 const exportButton = document.getElementById('export-button');
 const clearButton = document.getElementById('clear-button');
+const toast = document.getElementById('toast');
 
 let currentPosition = null; // { lat, lon }
 let currentFotoBlob = null;
+let toastTimer = null;
+
+// ---------- Chip-Groups (Ja/Nein & Co. statt Dropdown) ----------
+
+const chipState = {
+  changing_table: '',
+  changing_table_location: '',
+  stroller_access: '',
+  quelle: 'field_survey',
+};
+
+function setupChipGroups() {
+  document.querySelectorAll('.chip-group[data-field]').forEach((group) => {
+    const field = group.dataset.field;
+    group.querySelectorAll('.chip').forEach((chip) => {
+      chip.setAttribute('aria-pressed', 'false');
+      chip.addEventListener('click', () => {
+        if (group.dataset.disabled === 'true') return;
+        selectChip(field, chip.dataset.value);
+      });
+    });
+  });
+  // Vorbelegung "Selbst gesehen" sichtbar machen
+  selectChip('quelle', 'field_survey');
+}
+
+function selectChip(field, value) {
+  chipState[field] = value;
+  const group = document.querySelector(`.chip-group[data-field="${field}"]`);
+  group.querySelectorAll('.chip').forEach((chip) => {
+    const active = chip.dataset.value === value;
+    chip.classList.toggle('active', active);
+    chip.setAttribute('aria-pressed', String(active));
+  });
+
+  if (field === 'changing_table') {
+    const locationGroup = document.querySelector('.chip-group[data-field="changing_table_location"]');
+    const enabled = value === 'yes';
+    locationGroup.dataset.disabled = String(!enabled);
+    if (!enabled) resetChip('changing_table_location');
+  }
+}
+
+function resetChip(field) {
+  chipState[field] = '';
+  const group = document.querySelector(`.chip-group[data-field="${field}"]`);
+  group.querySelectorAll('.chip').forEach((chip) => {
+    chip.classList.remove('active');
+    chip.setAttribute('aria-pressed', 'false');
+  });
+}
+
+function resetAllChips() {
+  resetChip('changing_table');
+  resetChip('changing_table_location');
+  resetChip('stroller_access');
+  document.querySelector('.chip-group[data-field="changing_table_location"]').dataset.disabled = 'true';
+  selectChip('quelle', 'field_survey');
+}
+
+// ---------- Toast ----------
+
+function showToast(message) {
+  toast.textContent = message;
+  toast.hidden = false;
+  requestAnimationFrame(() => toast.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      toast.hidden = true;
+    }, 250);
+  }, 2200);
+}
+
+// ---------- Init ----------
 
 function init() {
   datumInput.value = todayIso();
@@ -171,15 +249,10 @@ function init() {
     opt.textContent = bezirk;
     bezirkSelect.appendChild(opt);
   }
+  setupChipGroups();
   renderList();
   registerServiceWorker();
 }
-
-tableSelect.addEventListener('change', () => {
-  const enabled = tableSelect.value === 'yes';
-  locationSelect.disabled = !enabled;
-  if (!enabled) locationSelect.value = '';
-});
 
 fotoInput.addEventListener('change', () => {
   const file = fotoInput.files && fotoInput.files[0];
@@ -198,18 +271,36 @@ gpsButton.addEventListener('click', async () => {
     return;
   }
   gpsStatus.textContent = 'Standort wird ermittelt …';
+  gpsButton.disabled = true;
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
+      gpsButton.disabled = false;
       currentPosition = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      gpsStatus.textContent = `Standort erfasst (±${Math.round(pos.coords.accuracy)} m).`;
+      gpsStatus.textContent = `✓ Standort erfasst (±${Math.round(pos.coords.accuracy)} m) — auf der Karte prüfen.`;
+      showMap(currentPosition.lat, currentPosition.lon);
       await suggestBezirk(currentPosition);
     },
     (err) => {
+      gpsButton.disabled = false;
       gpsStatus.textContent = `Standort nicht verfügbar: ${err.message}`;
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
   );
 });
+
+function showMap(lat, lon) {
+  const dLon = 0.004;
+  const dLat = 0.0028;
+  const bbox = [lon - dLon, lat - dLat, lon + dLon, lat + dLat].join('%2C');
+  gpsMapFrame.src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lon}`;
+  gpsMapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`;
+  gpsMapWrap.hidden = false;
+}
+
+function hideMap() {
+  gpsMapWrap.hidden = true;
+  gpsMapFrame.src = 'about:blank';
+}
 
 async function suggestBezirk({ lat, lon }) {
   if (!navigator.onLine) return; // offline: kein Reverse-Geocoding-Versuch
@@ -233,7 +324,20 @@ async function suggestBezirk({ lat, lon }) {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!form.reportValidity()) return;
+
+  const missing = [];
+  if (!datumInput.value) missing.push('Datum');
+  if (!ortInput.value.trim()) missing.push('Ort');
+  if (!chipState.changing_table) missing.push('Wickeltisch vorhanden?');
+  if (!chipState.stroller_access) missing.push('Erreichbarkeit mit Kinderwagen');
+
+  if (missing.length > 0) {
+    formError.textContent = `Bitte ausfüllen: ${missing.join(', ')}.`;
+    formError.hidden = false;
+    formError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  formError.hidden = true;
 
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -241,11 +345,11 @@ form.addEventListener('submit', async (event) => {
     ort_name: ortInput.value.trim(),
     adresse: adresseInput.value.trim(),
     stadtbezirk: bezirkSelect.value,
-    changing_table: tableSelect.value,
-    changing_table_location: locationSelect.value,
-    stroller_access: strollerSelect.value,
+    changing_table: chipState.changing_table,
+    changing_table_location: chipState.changing_table_location,
+    stroller_access: chipState.stroller_access,
     notiz: notizInput.value.trim(),
-    quelle: quelleSelect.value,
+    quelle: chipState.quelle,
     lat: currentPosition ? currentPosition.lat : '',
     lon: currentPosition ? currentPosition.lon : '',
     foto: currentFotoBlob || null,
@@ -256,14 +360,15 @@ form.addEventListener('submit', async (event) => {
 
   form.reset();
   datumInput.value = todayIso();
-  quelleSelect.value = 'field_survey';
-  locationSelect.disabled = true;
+  resetAllChips();
   fotoPreview.hidden = true;
   bezirkVorschlag.hidden = true;
   gpsStatus.textContent = 'Noch kein Standort erfasst.';
+  hideMap();
   currentPosition = null;
   currentFotoBlob = null;
 
+  showToast(`✓ „${entry.ort_name}“ gespeichert`);
   await renderList();
 });
 
@@ -276,6 +381,7 @@ async function renderList() {
     (e) => e.quelle === 'field_survey' && e.changing_table_location
   ).length;
   progressSummary.textContent = `${gesamt} gespeichert (${mitStandort} mit WC-Standort) — Ziel: ${ZIEL_GESAMT} / ${ZIEL_MIT_STANDORT}`;
+  headerProgress.textContent = `${gesamt}/${ZIEL_GESAMT}`;
 
   entriesList.innerHTML = '';
   if (entries.length === 0) {
@@ -307,6 +413,12 @@ async function renderList() {
       locBadge.className = 'badge ok';
       locBadge.textContent = e.changing_table_location;
       badges.appendChild(locBadge);
+    }
+    if (e.lat && e.lon) {
+      const gpsBadge = document.createElement('span');
+      gpsBadge.className = 'badge';
+      gpsBadge.textContent = '📍 GPS';
+      badges.appendChild(gpsBadge);
     }
     if (e.quelle === 'operator_reply') {
       const srcBadge = document.createElement('span');

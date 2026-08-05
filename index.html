@@ -11,14 +11,21 @@
 <title>Wickelkompass — Felderfassung</title>
 
 <header class="app-header">
-  <h1>Wickelkompass — Felderfassung</h1>
-  <p class="subtitle">Privates Erfassungstool für die Wickel-Safari. Daten bleiben auf diesem Gerät.</p>
+  <div class="app-header-row">
+    <div>
+      <h1>Wickelkompass</h1>
+      <p class="subtitle">Felderfassung · Daten bleiben auf diesem Gerät</p>
+    </div>
+    <span id="header-progress" class="header-badge">0/150</span>
+  </div>
 </header>
 
 <main>
   <section class="card" aria-labelledby="form-heading">
     <h2 id="form-heading">Neue Beobachtung</h2>
     <form id="entry-form" novalidate>
+      <p id="form-error" class="form-error" hidden></p>
+
       <div class="field">
         <label for="datum">Datum *</label>
         <input type="date" id="datum" name="datum" required />
@@ -26,7 +33,7 @@
 
       <div class="field">
         <label for="ort_name">Ort (Name, bei Ketten mit Filiale) *</label>
-        <input type="text" id="ort_name" name="ort_name" required autocomplete="off" />
+        <input type="text" id="ort_name" name="ort_name" required autocomplete="off" placeholder="z. B. Hofbräuhaus" />
       </div>
 
       <div class="field">
@@ -38,6 +45,10 @@
         <label>Standort</label>
         <button type="button" id="gps-button" class="btn-secondary">📍 GPS erfassen</button>
         <p id="gps-status" class="hint" aria-live="polite">Noch kein Standort erfasst.</p>
+        <div id="gps-map-wrap" class="map-wrap" hidden>
+          <iframe id="gps-map" class="map-frame" loading="lazy" title="Kartenausschnitt mit erfasstem Standort"></iframe>
+          <a id="gps-map-link" class="map-link" target="_blank" rel="noopener">In OpenStreetMap öffnen ↗</a>
+        </div>
       </div>
 
       <div class="field">
@@ -49,33 +60,36 @@
       </div>
 
       <div class="field">
-        <label for="changing_table">Wickeltisch vorhanden? *</label>
-        <select id="changing_table" name="changing_table" required>
-          <option value="">— auswählen —</option>
-          <option value="yes">Ja</option>
-          <option value="no">Nein (nachweislich keiner)</option>
-        </select>
+        <label id="changing_table-label">Wickeltisch vorhanden? *</label>
+        <div class="chip-group" role="radiogroup" aria-labelledby="changing_table-label" data-field="changing_table">
+          <button type="button" class="chip" data-value="yes">✅ Ja</button>
+          <button type="button" class="chip" data-value="no">🚫 Nein</button>
+        </div>
       </div>
 
       <div class="field">
-        <label for="changing_table_location">WC-Standort (nur wenn selbst gesehen)</label>
-        <select id="changing_table_location" name="changing_table_location" disabled>
-          <option value="">— unbekannt / nicht erfasst —</option>
-          <option value="female_toilet">Nur Damen-WC</option>
-          <option value="male_toilet">Nur Herren-WC</option>
-          <option value="unisex">Unisex / in beiden</option>
-          <option value="dedicated_room">Eigener Wickelraum</option>
-        </select>
+        <label id="changing_table_location-label">WC-Standort (nur wenn selbst gesehen)</label>
+        <div
+          class="chip-group"
+          role="radiogroup"
+          aria-labelledby="changing_table_location-label"
+          data-field="changing_table_location"
+          data-disabled="true"
+        >
+          <button type="button" class="chip" data-value="female_toilet">Damen-WC</button>
+          <button type="button" class="chip" data-value="male_toilet">Herren-WC</button>
+          <button type="button" class="chip" data-value="unisex">Unisex</button>
+          <button type="button" class="chip" data-value="dedicated_room">Eigener Raum</button>
+        </div>
       </div>
 
       <div class="field">
-        <label for="stroller_access">Erreichbarkeit mit Kinderwagen *</label>
-        <select id="stroller_access" name="stroller_access" required>
-          <option value="">— auswählen —</option>
-          <option value="yes">Stufenlos</option>
-          <option value="limited">Eingeschränkt (Hindernis)</option>
-          <option value="no">Nicht erreichbar</option>
-        </select>
+        <label id="stroller_access-label">Erreichbarkeit mit Kinderwagen *</label>
+        <div class="chip-group" role="radiogroup" aria-labelledby="stroller_access-label" data-field="stroller_access">
+          <button type="button" class="chip" data-value="yes">Stufenlos</button>
+          <button type="button" class="chip" data-value="limited">Eingeschränkt</button>
+          <button type="button" class="chip" data-value="no">Nicht erreichbar</button>
+        </div>
       </div>
 
       <div class="field">
@@ -90,15 +104,15 @@
       </div>
 
       <div class="field">
-        <label for="quelle">Quelle *</label>
-        <select id="quelle" name="quelle" required>
-          <option value="field_survey">Selbst gesehen (field_survey)</option>
-          <option value="operator_reply">Auskunft vom Personal (operator_reply)</option>
-        </select>
-        <p class="hint">Zählt nur „field_survey“ in die 150er-Zielgröße.</p>
+        <label id="quelle-label">Quelle *</label>
+        <div class="chip-group" role="radiogroup" aria-labelledby="quelle-label" data-field="quelle">
+          <button type="button" class="chip" data-value="field_survey">Selbst gesehen</button>
+          <button type="button" class="chip" data-value="operator_reply">Personal gefragt</button>
+        </div>
+        <p class="hint">Zählt nur „Selbst gesehen“ (field_survey) in die 150er-Zielgröße.</p>
       </div>
 
-      <button type="submit" class="btn-primary">Speichern</button>
+      <button type="submit" class="btn-primary btn-pill">💾 Speichern</button>
     </form>
   </section>
 
@@ -116,7 +130,7 @@
       (Mail, WhatsApp, …). Andernfalls werden die Dateien heruntergeladen, zum
       manuellen Anhängen.
     </p>
-    <button type="button" id="export-button" class="btn-primary">📤 Exportieren / Teilen</button>
+    <button type="button" id="export-button" class="btn-primary btn-pill">📤 Exportieren / Teilen</button>
     <button type="button" id="clear-button" class="btn-danger">Alle Einträge löschen</button>
   </section>
 </main>
@@ -128,5 +142,7 @@
     OpenStreetMap Nominatim). Kein automatischer Versand.
   </p>
 </footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="./app.js" defer></script>
