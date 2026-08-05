@@ -26,9 +26,15 @@
     <form id="entry-form" novalidate>
       <p id="form-error" class="form-error" hidden></p>
 
-      <div class="field">
-        <label for="datum">Datum *</label>
-        <input type="date" id="datum" name="datum" required />
+      <div class="field-row">
+        <div class="field">
+          <label for="datum">Datum *</label>
+          <input type="date" id="datum" name="datum" required />
+        </div>
+        <div class="field">
+          <label for="uhrzeit">Uhrzeit</label>
+          <input type="time" id="uhrzeit" name="uhrzeit" />
+        </div>
       </div>
 
       <div class="field">
@@ -40,6 +46,11 @@
         <label>Standort</label>
         <button type="button" id="gps-button" class="btn-secondary">📍 GPS erfassen</button>
         <p id="gps-status" class="hint" aria-live="polite">Noch kein Standort erfasst.</p>
+        <p id="dup-warning" class="dup-warning" hidden></p>
+        <div id="nearby-wrap" class="nearby-wrap" hidden>
+          <p class="hint">In der Nähe (antippen zum Übernehmen):</p>
+          <ul id="nearby-list" class="nearby-list"></ul>
+        </div>
         <div id="gps-map-wrap" class="map-wrap" hidden>
           <iframe id="gps-map" class="map-frame" loading="lazy" title="Kartenausschnitt mit erfasstem Standort"></iframe>
           <a id="gps-map-link" class="map-link" target="_blank" rel="noopener">In OpenStreetMap öffnen ↗</a>
@@ -109,6 +120,32 @@
       </div>
 
       <div class="field">
+        <label id="zugang-label">Zugänglichkeit (optional)</label>
+        <div class="chip-group" role="radiogroup" aria-labelledby="zugang-label" data-field="zugang">
+          <button type="button" class="chip" data-value="frei">Frei zugänglich</button>
+          <button type="button" class="chip" data-value="nur_kunden">Nur Kunden</button>
+          <button type="button" class="chip" data-value="schluessel">Schlüssel nötig</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label id="kostenpflichtig-label">WC kostenpflichtig? (optional)</label>
+        <div class="chip-group" role="radiogroup" aria-labelledby="kostenpflichtig-label" data-field="kostenpflichtig">
+          <button type="button" class="chip" data-value="yes">Ja</button>
+          <button type="button" class="chip" data-value="no">Nein</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label id="zustand-label">Zustand (optional)</label>
+        <div class="chip-group" role="radiogroup" aria-labelledby="zustand-label" data-field="zustand">
+          <button type="button" class="chip" data-value="sauber">Sauber</button>
+          <button type="button" class="chip" data-value="ok">OK</button>
+          <button type="button" class="chip" data-value="schlecht">Schlecht</button>
+        </div>
+      </div>
+
+      <div class="field">
         <label for="foto">Foto (nur als Gedächtnisstütze, bleibt lokal)</label>
         <input type="file" id="foto" name="foto" accept="image/*" capture="environment" />
         <img id="foto-preview" class="foto-preview" hidden alt="Vorschau des aufgenommenen Fotos" />
@@ -116,7 +153,7 @@
 
       <div class="field">
         <label for="notiz">Notiz</label>
-        <textarea id="notiz" name="notiz" rows="3" placeholder="Zugang, Öffnungszeiten, Zustand, Wegbeschreibung …"></textarea>
+        <textarea id="notiz" name="notiz" rows="3" placeholder="Wegbeschreibung, Sonstiges …"></textarea>
       </div>
 
       <div class="field">
@@ -154,8 +191,8 @@
 <footer class="app-footer">
   <p>
     Alles bleibt lokal auf diesem Gerät (IndexedDB), außer beim expliziten Export
-    oder dem optionalen GPS-Stadtbezirk-Abgleich (nur Koordinaten, an
-    OpenStreetMap Nominatim). Kein automatischer Versand.
+    oder den optionalen GPS-Abgleichen (nur Koordinaten, an OpenStreetMap
+    Nominatim/Overpass). Kein automatischer Versand.
   </p>
 </footer>
 

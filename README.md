@@ -24,10 +24,11 @@ eigenen erfassten Daten.** Drei getrennte Dinge:
    ausschließlich lokal im Browser des jeweiligen Geräts (IndexedDB). Der
    Code enthält keinen einzigen Netzwerk-Call, der diese Daten irgendwohin
    sendet.
-3. Der einzige automatische Netzwerk-Call ist der optionale
-   Stadtbezirk-Vorschlag (siehe unten) — dabei gehen ausschließlich rohe
-   GPS-Koordinaten an OpenStreetMap Nominatim raus, keine Ortsnamen, keine
-   Notizen, keine Fotos. Export passiert nur auf expliziten Klick, über das
+3. Die automatischen Netzwerk-Calls sind der optionale Stadtbezirk-/Adress-
+   Vorschlag (OpenStreetMap Nominatim) und die Umkreissuche (OpenStreetMap
+   Overpass), beide nur nach GPS-Erfassung ausgelöst — dabei gehen
+   ausschließlich rohe GPS-Koordinaten raus, keine Ortsnamen, keine Notizen,
+   keine Fotos. Export passiert nur auf expliziten Klick, über das
    Teilen-Menü des Geräts oder als lokaler Download — nie automatisch.
 
 ## Vanilla, keine Abhängigkeiten
@@ -67,12 +68,28 @@ Erweiterungen gegenüber dem Papier-Bogen:
 
 - **GPS-Koordinaten** (`lat`/`lon`), per Button erfasst — spart Adresstippen
   unterwegs, wird zusätzlich zu Name/Adresse gespeichert, nicht als Ersatz.
-- **Stadtbezirk-Vorschlag per Reverse-Geocoding**: Nach GPS-Erfassung wird
-  bei bestehender Verbindung ein Vorschlag aus den 8 Gruppen aus
-  `docs/erhebung/stadtteil-priorisierung.md` (Hauptrepo) befüllt (Mapping
-  der offiziellen 25 Münchner Stadtbezirke auf die 8 Gruppen in `app.js`,
-  `BEZIRK_MAPPING`) — bitte immer prüfen, ist nur ein Vorschlag. Offline
-  bleibt das Feld leer, GPS-Koordinaten werden trotzdem gespeichert.
+- **Stadtbezirk- und Adress-Vorschlag per Reverse-Geocoding**: Nach
+  GPS-Erfassung wird bei bestehender Verbindung ein Stadtbezirk aus den 8
+  Gruppen aus `docs/erhebung/stadtteil-priorisierung.md` (Hauptrepo)
+  vorgeschlagen (Mapping der offiziellen 25 Münchner Stadtbezirke auf die 8
+  Gruppen in `app.js`, `BEZIRK_MAPPING`) und — falls das Adressfeld noch
+  leer ist — Straße/Hausnummer automatisch befüllt. Bitte immer prüfen,
+  beides sind nur Vorschläge. Offline bleiben die Felder leer,
+  GPS-Koordinaten werden trotzdem gespeichert.
+- **Umkreissuche** (OpenStreetMap Overpass, kostenlos, kein Key): zeigt nach
+  GPS-Erfassung bis zu 6 nahegelegene benannte Orte (< 40 m) zum Antippen —
+  füllt Ort-Name (und Adresse, falls vorhanden) direkt aus. Zwei
+  Overpass-Spiegel mit Timeout hintereinander probiert, da der kostenlose
+  Dienst gelegentlich überlastet ist (kein SLA) — schlägt in dem Fall
+  einfach fehl, ohne die App zu stören, manuelle Eingabe bleibt möglich.
+- **Duplikat-Warnung**: liegt der neue GPS-Punkt < 30 m von einer bereits
+  gespeicherten Beobachtung entfernt, erscheint ein Hinweis mit Ortsname und
+  Datum — rein lokal, kein Netzwerk-Call. Blockiert nichts, nur ein Hinweis.
+- **Uhrzeit, Zugänglichkeit, Kostenpflichtig, Zustand** (alle optional):
+  strukturierte Zusatzfelder über den Erhebungsbogen hinaus — dort ist das
+  bisher nur Freitext in der Notiz. Gehen als eigene Spalten in den Export,
+  aber (noch) nicht in `mk.observation` — falls sich das dauerhaft bewährt,
+  gehört das ins dokumentierte Datenmodell im Hauptrepo nachgezogen.
 - **Foto** (optional, rein als eigene Gedächtnisstütze). Bewusst nur für
   dieses private Tool — der Erhebungsbogen schließt Fotos fürs Produkt
   bewusst aus (Moderationsaufwand, Persönlichkeitsrechte, Speicherkosten).
@@ -94,9 +111,10 @@ Erweiterungen gegenüber dem Papier-Bogen:
 
 Button „Exportieren / Teilen" baut eine CSV (Spalten wie
 `docs/erhebung/beobachtungen.csv` im Hauptrepo, plus `lat`/`lon`/
-`google_maps_link` am Ende — die werden vom dortigen Auswertungsskript
-ignoriert, da es Spalten über den bekannten Header hinaus nicht auswertet)
-und hängt Fotos als einzelne Dateien an.
+`google_maps_link`/`uhrzeit`/`zugang`/`kostenpflichtig`/`zustand` am Ende —
+die werden vom dortigen Auswertungsskript ignoriert, da es Spalten über den
+bekannten Header hinaus nicht auswertet) und hängt Fotos als einzelne
+Dateien an.
 
 - Unterstützt das Gerät die Web-Share-API mit Dateien (die meisten aktuellen
   Mobil-Browser): öffnet das native Teilen-Menü — direkt an Mail, WhatsApp
@@ -111,8 +129,15 @@ Places-Zuordnung gebraucht).
 
 ## Löschen
 
-„Alle Einträge löschen" leert die IndexedDB unwiderruflich — vorher
-exportieren. Kein Cloud-Sync, kein Backup außer dem Export.
+Einzelne Einträge: Antippen auf „✕" entfernt sofort aus der Ansicht, wird
+aber erst nach 5 Sekunden wirklich aus IndexedDB gelöscht — der
+„Rückgängig"-Toast macht es in der Zwischenzeit rückgängig.
+
+„Alle Einträge löschen": erstes Antippen bewaffnet den Button („Wirklich?
+Nochmal tippen", 4 Sekunden Fenster) statt eines blockierenden
+Bestätigungsdialogs, zweites Antippen löscht wirklich — ebenfalls mit
+Rückgängig-Toast (Snapshot bleibt kurz im Speicher). Kein Cloud-Sync, kein
+Backup außer dem Export — nach Ablauf der Undo-Frist ist es wirklich weg.
 
 ## Bekannte Grenzen
 
@@ -125,6 +150,10 @@ exportieren. Kein Cloud-Sync, kein Backup außer dem Export.
   Anfrageumfang dieses persönlichen Tools gedacht — siehe
   [Nominatim Usage Policy](https://operations.osmfoundation.org/policies/nominatim/),
   kein Bulk-Einsatz.
+- Die Umkreissuche nutzt die öffentliche Overpass-API (zwei Spiegel,
+  ebenfalls kostenlos, kein Key) — best-effort ohne SLA, kann gelegentlich
+  mit Timeout/504 ausfallen. Kein Problem für den Ablauf, die Liste bleibt
+  dann einfach leer.
 - Repo ist öffentlich (GitHub-Pages-Voraussetzung im Free-Plan) — enthält
   aber bewusst keinerlei Projekt-/Geschäftskontext, nur das generische
   Erfassungswerkzeug.

@@ -5,7 +5,10 @@
  * IndexedDB (Fotos als Blob), exportiert per Web-Share-API oder Download.
  * Feldnamen/Werte sind bewusst identisch zu docs/erhebung/beobachtungen.csv
  * und docs/erhebung/erhebungsbogen.md, damit der Export ohne Mapping in die
- * Desktop-Auswertung (scripts/erhebung-fortschritt.mjs) passt.
+ * Desktop-Auswertung (scripts/erhebung-fortschritt.mjs) passt. Zusatzfelder
+ * (uhrzeit, zugang, kostenpflichtig, zustand, google_maps_link) haengen als
+ * Extraspalten hinten an -- das Auswertungsskript ignoriert unbekannte
+ * Spalten, siehe README.
  *
  * Kein Teil des Produkts (siehe README.md "Nicht enthalten: Anwendungscode")
  * -- rein privates Erfassungswerkzeug fuer die Vorbereitungsphase.
@@ -16,6 +19,8 @@ const DB_VERSION = 1;
 const STORE = 'beobachtungen';
 const ZIEL_GESAMT = 150;
 const ZIEL_MIT_STANDORT = 100;
+const DUPLIKAT_RADIUS_M = 30;
+const UNDO_FRIST_MS = 5000;
 
 const STADTBEZIRKE = [
   'Altstadt/Lehel',
@@ -106,6 +111,11 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function nowHm() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function csvEscape(value) {
   const s = String(value ?? '');
   return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -127,6 +137,17 @@ function guessBezirk(address) {
   return null;
 }
 
+// Haversine-Distanz in Metern -- fuer Duplikat-Check und Umkreissuche.
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -143,6 +164,7 @@ function downloadBlob(blob, filename) {
 const form = document.getElementById('entry-form');
 const formError = document.getElementById('form-error');
 const datumInput = document.getElementById('datum');
+const uhrzeitInput = document.getElementById('uhrzeit');
 const ortInput = document.getElementById('ort_name');
 const adresseInput = document.getElementById('adresse');
 const googleLinkInput = document.getElementById('google_maps_link');
@@ -153,6 +175,9 @@ const fotoPreview = document.getElementById('foto-preview');
 const notizInput = document.getElementById('notiz');
 const gpsButton = document.getElementById('gps-button');
 const gpsStatus = document.getElementById('gps-status');
+const dupWarning = document.getElementById('dup-warning');
+const nearbyWrap = document.getElementById('nearby-wrap');
+const nearbyList = document.getElementById('nearby-list');
 const gpsMapWrap = document.getElementById('gps-map-wrap');
 const gpsMapFrame = document.getElementById('gps-map');
 const gpsMapLink = document.getElementById('gps-map-link');
@@ -166,6 +191,7 @@ const toast = document.getElementById('toast');
 let currentPosition = null; // { lat, lon }
 let currentFotoBlob = null;
 let toastTimer = null;
+const pendingDeletes = new Map(); // id -> setTimeout-Handle (Soft-Delete mit Undo)
 
 // ---------- Chip-Groups (Ja/Nein & Co. statt Dropdown) ----------
 
@@ -173,6 +199,9 @@ const chipState = {
   changing_table: '',
   changing_table_location: '',
   stroller_access: '',
+  zugang: '',
+  kostenpflichtig: '',
+  zustand: '',
   quelle: 'field_survey',
 };
 
@@ -183,7 +212,12 @@ function setupChipGroups() {
       chip.setAttribute('aria-pressed', 'false');
       chip.addEventListener('click', () => {
         if (group.dataset.disabled === 'true') return;
-        selectChip(field, chip.dataset.value);
+        // Erneutes Antippen des aktiven Chips hebt die Auswahl auf (nur bei optionalen Feldern sinnvoll)
+        if (chipState[field] === chip.dataset.value && field !== 'quelle' && field !== 'changing_table') {
+          selectChip(field, '');
+        } else {
+          selectChip(field, chip.dataset.value);
+        }
       });
     });
   });
@@ -221,29 +255,49 @@ function resetAllChips() {
   resetChip('changing_table');
   resetChip('changing_table_location');
   resetChip('stroller_access');
+  resetChip('zugang');
+  resetChip('kostenpflichtig');
+  resetChip('zustand');
   document.querySelector('.chip-group[data-field="changing_table_location"]').dataset.disabled = 'true';
   selectChip('quelle', 'field_survey');
 }
 
-// ---------- Toast ----------
+// ---------- Toast (mit optionaler Undo-Aktion) ----------
 
-function showToast(message) {
-  toast.textContent = message;
+function showToast(message, action) {
+  toast.innerHTML = '';
+  const span = document.createElement('span');
+  span.textContent = message;
+  toast.appendChild(span);
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      action.onClick();
+      hideToastNow();
+    });
+    toast.appendChild(btn);
+  }
   toast.hidden = false;
   requestAnimationFrame(() => toast.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.classList.remove('show');
-    setTimeout(() => {
-      toast.hidden = true;
-    }, 250);
-  }, 2200);
+  toastTimer = setTimeout(hideToastNow, action ? UNDO_FRIST_MS + 800 : 2200);
+}
+
+function hideToastNow() {
+  toast.classList.remove('show');
+  setTimeout(() => {
+    toast.hidden = true;
+  }, 250);
 }
 
 // ---------- Init ----------
 
 function init() {
   datumInput.value = todayIso();
+  uhrzeitInput.value = nowHm();
   for (const bezirk of STADTBEZIRKE) {
     const opt = document.createElement('option');
     opt.value = bezirk;
@@ -272,6 +326,8 @@ gpsButton.addEventListener('click', async () => {
     return;
   }
   gpsStatus.textContent = 'Standort wird ermittelt …';
+  dupWarning.hidden = true;
+  nearbyWrap.hidden = true;
   gpsButton.disabled = true;
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
@@ -279,7 +335,11 @@ gpsButton.addEventListener('click', async () => {
       currentPosition = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       gpsStatus.textContent = `✓ Standort erfasst (±${Math.round(pos.coords.accuracy)} m) — auf der Karte prüfen.`;
       showMap(currentPosition.lat, currentPosition.lon);
-      await suggestBezirk(currentPosition);
+      await Promise.all([
+        checkDuplicates(currentPosition.lat, currentPosition.lon),
+        suggestBezirkUndAdresse(currentPosition),
+        findNearby(currentPosition.lat, currentPosition.lon),
+      ]);
     },
     (err) => {
       gpsButton.disabled = false;
@@ -303,24 +363,153 @@ function hideMap() {
   gpsMapFrame.src = 'about:blank';
 }
 
-async function suggestBezirk({ lat, lon }) {
+// Duplikat-Check: warnt, wenn der neue GPS-Punkt nah an einer bereits
+// gespeicherten Beobachtung liegt -- rein lokal, kein Netzwerk.
+async function checkDuplicates(lat, lon) {
+  const entries = await getAllEntries();
+  const treffer = entries
+    .filter((e) => e.lat && e.lon && !pendingDeletes.has(e.id))
+    .map((e) => ({ e, dist: distanceMeters(lat, lon, e.lat, e.lon) }))
+    .filter((x) => x.dist <= DUPLIKAT_RADIUS_M)
+    .sort((a, b) => a.dist - b.dist);
+
+  if (treffer.length > 0) {
+    const { e, dist } = treffer[0];
+    dupWarning.hidden = false;
+    dupWarning.textContent = `⚠ Schon erfasst: „${e.ort_name}“ ca. ${Math.round(dist)} m entfernt (${e.datum}).`;
+  } else {
+    dupWarning.hidden = true;
+  }
+}
+
+async function suggestBezirkUndAdresse({ lat, lon }) {
   if (!navigator.onLine) return; // offline: kein Reverse-Geocoding-Versuch
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=14&addressdetails=1`,
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=17&addressdetails=1`,
       { headers: { 'Accept-Language': 'de' } }
     );
     if (!res.ok) return;
     const data = await res.json();
-    const bucket = guessBezirk(data.address);
+    const addr = data.address || {};
+
+    const bucket = guessBezirk(addr);
     if (bucket) {
       bezirkVorschlag.hidden = false;
       bezirkVorschlag.textContent = `Vorschlag laut GPS: ${bucket} — bitte prüfen.`;
       if (!bezirkSelect.value) bezirkSelect.value = bucket;
     }
+
+    if (!adresseInput.value.trim() && (addr.road || addr.house_number)) {
+      adresseInput.value = [addr.road, addr.house_number].filter(Boolean).join(' ');
+    }
   } catch {
     // Offline oder Nominatim nicht erreichbar -- GPS-Koordinaten bleiben trotzdem gespeichert.
   }
+}
+
+// Grobe Uebersetzung haeufiger OSM-Tags in verstaendliche Kurzlabels.
+const KATEGORIE_LABELS = {
+  cafe: 'Café',
+  restaurant: 'Restaurant',
+  fast_food: 'Fast Food',
+  bar: 'Bar',
+  pub: 'Kneipe',
+  pharmacy: 'Apotheke',
+  supermarket: 'Supermarkt',
+  department_store: 'Kaufhaus',
+  mall: 'Einkaufszentrum',
+  clothes: 'Kleidung',
+  museum: 'Museum',
+  bakery: 'Bäckerei',
+  doctors: 'Arztpraxis',
+  bank: 'Bank',
+  toilets: 'WC',
+};
+
+function kategorieLabel(tags) {
+  const raw = tags.shop || tags.amenity || tags.tourism || tags.leisure || tags.office || '';
+  return KATEGORIE_LABELS[raw] || raw.replace(/_/g, ' ');
+}
+
+// Zwei oeffentliche Overpass-Spiegel -- die kostenlose Infrastruktur ist
+// best-effort ohne SLA und faellt gelegentlich mit 504 aus. Erster
+// Treffer gewinnt, jeweils mit kurzem Timeout, damit ein toter Spiegel
+// nicht laenger blockiert als noetig.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
+
+async function overpassFetch(query) {
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(query),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) return await res.json();
+    } catch {
+      // naechsten Spiegel probieren
+    }
+  }
+  return null;
+}
+
+// Umkreissuche ueber die oeffentliche Overpass-API (kostenlos, kein Key).
+// Rein informativ zum Antippen -- kein automatischer Datenabgleich.
+async function findNearby(lat, lon) {
+  if (!navigator.onLine) return;
+  const query = `[out:json][timeout:10];(node(around:40,${lat},${lon})[name];way(around:40,${lat},${lon})[name];);out center 20;`;
+  try {
+    const data = await overpassFetch(query);
+    if (!data) return;
+    const results = (data.elements || [])
+      .map((el) => {
+        const pos = el.type === 'node' ? el : el.center;
+        if (!pos) return null;
+        return {
+          name: el.tags.name,
+          kategorie: kategorieLabel(el.tags),
+          adresse: [el.tags['addr:street'], el.tags['addr:housenumber']].filter(Boolean).join(' '),
+          dist: distanceMeters(lat, lon, pos.lat, pos.lon),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 6);
+
+    renderNearby(results);
+  } catch {
+    // Offline oder Overpass nicht erreichbar -- kein Problem, manuelle Eingabe bleibt.
+  }
+}
+
+function renderNearby(results) {
+  nearbyList.innerHTML = '';
+  if (results.length === 0) {
+    nearbyWrap.hidden = true;
+    return;
+  }
+  for (const r of results) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'nearby-item';
+    btn.innerHTML = `<strong>${r.name}</strong><span>${r.kategorie ? r.kategorie + ' · ' : ''}${Math.round(r.dist)} m</span>`;
+    btn.addEventListener('click', () => {
+      ortInput.value = r.name;
+      if (r.adresse) adresseInput.value = r.adresse;
+      nearbyWrap.hidden = true;
+    });
+    li.appendChild(btn);
+    nearbyList.appendChild(li);
+  }
+  nearbyWrap.hidden = false;
 }
 
 form.addEventListener('submit', async (event) => {
@@ -343,6 +532,7 @@ form.addEventListener('submit', async (event) => {
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     datum: datumInput.value,
+    uhrzeit: uhrzeitInput.value,
     ort_name: ortInput.value.trim(),
     adresse: adresseInput.value.trim(),
     google_maps_link: googleLinkInput.value.trim(),
@@ -350,6 +540,9 @@ form.addEventListener('submit', async (event) => {
     changing_table: chipState.changing_table,
     changing_table_location: chipState.changing_table_location,
     stroller_access: chipState.stroller_access,
+    zugang: chipState.zugang,
+    kostenpflichtig: chipState.kostenpflichtig,
+    zustand: chipState.zustand,
     notiz: notizInput.value.trim(),
     quelle: chipState.quelle,
     lat: currentPosition ? currentPosition.lat : '',
@@ -362,9 +555,12 @@ form.addEventListener('submit', async (event) => {
 
   form.reset();
   datumInput.value = todayIso();
+  uhrzeitInput.value = nowHm();
   resetAllChips();
   fotoPreview.hidden = true;
   bezirkVorschlag.hidden = true;
+  dupWarning.hidden = true;
+  nearbyWrap.hidden = true;
   gpsStatus.textContent = 'Noch kein Standort erfasst.';
   hideMap();
   currentPosition = null;
@@ -375,7 +571,7 @@ form.addEventListener('submit', async (event) => {
 });
 
 async function renderList() {
-  const entries = await getAllEntries();
+  const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
   entries.sort((a, b) => (a.datum < b.datum ? 1 : -1));
 
   const gesamt = entries.filter((e) => e.quelle === 'field_survey').length;
@@ -432,7 +628,7 @@ async function renderList() {
 
     const meta = document.createElement('div');
     meta.className = 'entry-meta';
-    meta.textContent = `${e.datum} · ${e.stadtbezirk || 'ohne Bezirk'} · ${e.adresse || ''}`;
+    meta.textContent = `${e.datum}${e.uhrzeit ? ' ' + e.uhrzeit : ''} · ${e.stadtbezirk || 'ohne Bezirk'} · ${e.adresse || ''}`;
     main.appendChild(meta);
 
     li.appendChild(main);
@@ -441,20 +637,35 @@ async function renderList() {
     del.className = 'entry-delete';
     del.textContent = '✕';
     del.title = 'Löschen';
-    del.addEventListener('click', async () => {
-      if (confirm(`„${e.ort_name}“ wirklich löschen?`)) {
-        await deleteEntry(e.id);
-        await renderList();
-      }
-    });
+    del.addEventListener('click', () => softDeleteEntry(e));
     li.appendChild(del);
 
     entriesList.appendChild(li);
   }
 }
 
+// Soft-Delete: sofort aus der Ansicht entfernen, aber erst nach Ablauf der
+// Undo-Frist wirklich aus IndexedDB loeschen -- ersetzt den blockierenden
+// confirm()-Dialog durch einen Rueckgaengig-Toast.
+function softDeleteEntry(entry) {
+  const timeoutId = setTimeout(async () => {
+    pendingDeletes.delete(entry.id);
+    await deleteEntry(entry.id);
+  }, UNDO_FRIST_MS);
+  pendingDeletes.set(entry.id, timeoutId);
+  renderList();
+  showToast(`Gelöscht: „${entry.ort_name}“`, {
+    label: 'Rückgängig',
+    onClick: () => {
+      clearTimeout(pendingDeletes.get(entry.id));
+      pendingDeletes.delete(entry.id);
+      renderList();
+    },
+  });
+}
+
 exportButton.addEventListener('click', async () => {
-  const entries = await getAllEntries();
+  const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
   if (entries.length === 0) {
     alert('Keine Beobachtungen gespeichert.');
     return;
@@ -473,6 +684,10 @@ exportButton.addEventListener('click', async () => {
     'lat',
     'lon',
     'google_maps_link',
+    'uhrzeit',
+    'zugang',
+    'kostenpflichtig',
+    'zustand',
   ];
   const lines = [header.join(';')];
   for (const e of entries) {
@@ -514,12 +729,38 @@ exportButton.addEventListener('click', async () => {
   );
 });
 
+// "Alle löschen": zweiter Tap zur Bestätigung statt native confirm(), danach
+// ebenfalls per Undo-Toast rueckgaengig machbar (Snapshot vorher im Speicher).
+let clearArmed = false;
+let clearArmTimeout = null;
+const CLEAR_BUTTON_TEXT = 'Alle Einträge löschen';
+
 clearButton.addEventListener('click', async () => {
-  if (!confirm('Wirklich ALLE gespeicherten Beobachtungen löschen? Das kann nicht rückgängig gemacht werden.')) {
+  if (!clearArmed) {
+    clearArmed = true;
+    clearButton.textContent = 'Wirklich? Nochmal tippen';
+    clearArmTimeout = setTimeout(() => {
+      clearArmed = false;
+      clearButton.textContent = CLEAR_BUTTON_TEXT;
+    }, 4000);
     return;
   }
+  clearTimeout(clearArmTimeout);
+  clearArmed = false;
+  clearButton.textContent = CLEAR_BUTTON_TEXT;
+
+  const snapshot = await getAllEntries();
+  if (snapshot.length === 0) return;
   await clearAllEntries();
+  pendingDeletes.clear();
   await renderList();
+  showToast(`${snapshot.length} ${snapshot.length === 1 ? 'Eintrag' : 'Einträge'} gelöscht`, {
+    label: 'Rückgängig',
+    onClick: async () => {
+      for (const entry of snapshot) await addEntry(entry);
+      await renderList();
+    },
+  });
 });
 
 function registerServiceWorker() {
