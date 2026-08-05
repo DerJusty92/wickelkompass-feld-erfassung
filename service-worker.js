@@ -9,7 +9,7 @@
  * Versionsnummer im CACHE-Namen hochzaehlen, wenn sich App-Shell-Dateien
  * aendern, sonst greift der Browser weiter auf die alte Version zurueck.
  */
-const CACHE = 'wk-feld-erfassung-v2';
+const CACHE = 'wk-feld-erfassung-v3';
 const ASSETS = [
   './',
   './index.html',

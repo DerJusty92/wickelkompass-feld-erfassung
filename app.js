@@ -145,6 +145,7 @@ const formError = document.getElementById('form-error');
 const datumInput = document.getElementById('datum');
 const ortInput = document.getElementById('ort_name');
 const adresseInput = document.getElementById('adresse');
+const googleLinkInput = document.getElementById('google_maps_link');
 const bezirkSelect = document.getElementById('stadtbezirk');
 const bezirkVorschlag = document.getElementById('bezirk-vorschlag');
 const fotoInput = document.getElementById('foto');
@@ -344,6 +345,7 @@ form.addEventListener('submit', async (event) => {
     datum: datumInput.value,
     ort_name: ortInput.value.trim(),
     adresse: adresseInput.value.trim(),
+    google_maps_link: googleLinkInput.value.trim(),
     stadtbezirk: bezirkSelect.value,
     changing_table: chipState.changing_table,
     changing_table_location: chipState.changing_table_location,
@@ -470,6 +472,7 @@ exportButton.addEventListener('click', async () => {
     'quelle',
     'lat',
     'lon',
+    'google_maps_link',
   ];
   const lines = [header.join(';')];
   for (const e of entries) {

@@ -36,11 +36,6 @@
         <input type="text" id="ort_name" name="ort_name" required autocomplete="off" placeholder="z. B. Hofbräuhaus" />
       </div>
 
-      <div class="field">
-        <label for="adresse">Adresse</label>
-        <input type="text" id="adresse" name="adresse" autocomplete="off" placeholder="Straße, Hausnummer" />
-      </div>
-
       <div class="field gps-field">
         <label>Standort</label>
         <button type="button" id="gps-button" class="btn-secondary">📍 GPS erfassen</button>
@@ -49,6 +44,27 @@
           <iframe id="gps-map" class="map-frame" loading="lazy" title="Kartenausschnitt mit erfasstem Standort"></iframe>
           <a id="gps-map-link" class="map-link" target="_blank" rel="noopener">In OpenStreetMap öffnen ↗</a>
         </div>
+      </div>
+
+      <div class="field">
+        <label for="adresse">Adresse (optional, GPS reicht meist)</label>
+        <input type="text" id="adresse" name="adresse" autocomplete="off" placeholder="Straße, Hausnummer" />
+      </div>
+
+      <div class="field">
+        <label for="google_maps_link">Google-Maps-Link (optional)</label>
+        <input
+          type="url"
+          id="google_maps_link"
+          name="google_maps_link"
+          autocomplete="off"
+          placeholder="https://maps.app.goo.gl/…"
+        />
+        <p class="hint">
+          Ort selbst in Google Maps suchen, „Teilen"-Link reinkopieren. Nur ein
+          Verweis für später — es findet kein automatischer Abruf von Google
+          statt (siehe README, Abschnitt „Google-Maps-Link").
+        </p>
       </div>
 
       <div class="field">

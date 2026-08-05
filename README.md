@@ -78,14 +78,25 @@ Erweiterungen gegenüber dem Papier-Bogen:
   bewusst aus (Moderationsaufwand, Persönlichkeitsrechte, Speicherkosten).
   Das Foto geht beim Export als eigene Datei mit raus, landet aber nicht in
   der CSV und nicht in `mk.observation`.
+- **Google-Maps-Link** (optional, `google_maps_link`): reiner Referenz-Link,
+  von Hand aus Google Maps kopiert. **Kein automatischer Abruf der
+  Google-Places-API** aus dieser App heraus — Google Maps Platform hat
+  eigene, strikte Nutzungsbedingungen für das dauerhafte Speichern von
+  Place-Daten (anders als bei OSM/ADR 0001 im Hauptrepo, aber im gleichen
+  Geist: nicht einfach mischen/cachen, ohne die Bedingungen geprüft zu
+  haben). Ausnahme ist die reine Google Place ID, die laut Google
+  unbegrenzt speicherbar ist — die künftige Auflösung Link → Place ID
+  gehört serverseitig erledigt (API-Key darf nicht in dieser öffentlichen
+  Client-PWA landen), nicht hier. Eine echte Places-Integration mit
+  Zusatzinfos braucht vorher eine eigene ADR im Hauptrepo.
 
 ## Export
 
 Button „Exportieren / Teilen" baut eine CSV (Spalten wie
-`docs/erhebung/beobachtungen.csv` im Hauptrepo, plus `lat`/`lon` am Ende —
-die werden vom dortigen Auswertungsskript ignoriert, da es Spalten über den
-bekannten Header hinaus nicht auswertet) und hängt Fotos als einzelne
-Dateien an.
+`docs/erhebung/beobachtungen.csv` im Hauptrepo, plus `lat`/`lon`/
+`google_maps_link` am Ende — die werden vom dortigen Auswertungsskript
+ignoriert, da es Spalten über den bekannten Header hinaus nicht auswertet)
+und hängt Fotos als einzelne Dateien an.
 
 - Unterstützt das Gerät die Web-Share-API mit Dateien (die meisten aktuellen
   Mobil-Browser): öffnet das native Teilen-Menü — direkt an Mail, WhatsApp
@@ -93,8 +104,10 @@ Dateien an.
 - Sonst: Dateien werden heruntergeladen, manuell anhängen.
 
 Nach dem Export: Zeilen der CSV manuell unten in
-`docs/erhebung/beobachtungen.csv` (Hauptrepo) einfügen (Spalten `lat`/`lon`
-können beim Einfügen weggelassen werden, siehe oben).
+`docs/erhebung/beobachtungen.csv` (Hauptrepo) einfügen (Spalten `lat`/`lon`/
+`google_maps_link` können beim Einfügen weggelassen werden, siehe oben —
+ggf. `google_maps_link` separat aufheben, falls für eine spätere
+Places-Zuordnung gebraucht).
 
 ## Löschen
 
