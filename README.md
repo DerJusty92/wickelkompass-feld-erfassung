@@ -127,6 +127,19 @@ Nach dem Export: Zeilen der CSV manuell unten in
 ggf. `google_maps_link` separat aufheben, falls für eine spätere
 Places-Zuordnung gebraucht).
 
+## Export-Erinnerung
+
+Ganz oben erscheint ein Banner, sobald **10 Beobachtungen** oder **7 Tage**
+seit dem letzten Export zusammengekommen sind. Hintergrund: Die Daten liegen
+in genau einer Browser-Datenbank auf genau einem Gerät, der Export ist die
+einzige Sicherung — und die Persistenz-Zusage des Browsers
+(`navigator.storage.persist()`) wird nicht überall erteilt.
+
+Gezählt wird über den Erstellungszeitpunkt, der in der id jedes Eintrags
+steckt; gelöschte Einträge bringen die Zählung deshalb nicht durcheinander.
+Ein **abgebrochenes** Teilen setzt die Erinnerung bewusst nicht zurück —
+sonst wiegte sie in falscher Sicherheit.
+
 ## Löschen
 
 Einzelne Einträge: Antippen auf „✕" entfernt sofort aus der Ansicht, wird

@@ -23,6 +23,13 @@ const DUPLIKAT_RADIUS_M = 30;
 const UNDO_FRIST_MS = 5000;
 const CLEAR_UNDO_MS = 9000;
 
+// Export-Erinnerung. Die Daten liegen in genau einer Browser-Datenbank auf
+// genau einem Geraet; der Export ist die einzige Sicherung. Schwellen
+// bewusst niedrig -- lieber einmal zu oft erinnert als eine Safari verloren.
+const ERINNERUNG_EINTRAEGE = 10;
+const ERINNERUNG_TAGE = 7;
+const LS_LETZTER_EXPORT = 'wk-letzter-export';
+
 const STADTBEZIRKE = [
   'Altstadt/Lehel',
   'Ludwigsvorstadt/Isarvorstadt',
@@ -210,6 +217,9 @@ const headerProgress = document.getElementById('header-progress');
 const exportButton = document.getElementById('export-button');
 const clearButton = document.getElementById('clear-button');
 const storageWarning = document.getElementById('storage-warning');
+const exportReminder = document.getElementById('export-reminder');
+const exportReminderText = document.getElementById('export-reminder-text');
+const exportReminderButton = document.getElementById('export-reminder-button');
 const toast = document.getElementById('toast');
 
 let currentPosition = null; // { lat, lon }
@@ -331,6 +341,59 @@ function hideToastNow() {
   setTimeout(() => {
     toast.hidden = true;
   }, 250);
+}
+
+// ---------- Export-Erinnerung ----------
+
+// Die id beginnt mit Date.now() -- daraus laesst sich ableiten, welche
+// Eintraege nach dem letzten Export dazugekommen sind, ohne dass ein
+// zusaetzlicher Zaehler mit geloeschten Eintraegen aus dem Tritt geraet.
+function erstelltAm(entry) {
+  const ms = Number(String(entry.id).split('-')[0]);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function letzterExport() {
+  const roh = Number(localStorage.getItem(LS_LETZTER_EXPORT));
+  return Number.isFinite(roh) && roh > 0 ? roh : null;
+}
+
+function merkeExport() {
+  try {
+    localStorage.setItem(LS_LETZTER_EXPORT, String(Date.now()));
+  } catch (err) {
+    console.warn('Export-Zeitpunkt konnte nicht gemerkt werden.', err);
+  }
+}
+
+function tageSeit(ms) {
+  return Math.floor((Date.now() - ms) / 86400000);
+}
+
+function updateExportReminder(entries) {
+  const seit = letzterExport();
+  const neue = entries.filter((e) => erstelltAm(e) > (seit ?? 0));
+
+  if (neue.length === 0) {
+    exportReminder.hidden = true;
+    return;
+  }
+
+  // Ohne vorherigen Export zaehlt das Alter des aeltesten Eintrags.
+  const bezug = seit ?? Math.min(...neue.map(erstelltAm));
+  const tage = tageSeit(bezug);
+
+  if (neue.length < ERINNERUNG_EINTRAEGE && tage < ERINNERUNG_TAGE) {
+    exportReminder.hidden = true;
+    return;
+  }
+
+  const wieViele = `${neue.length} ${neue.length === 1 ? 'Beobachtung' : 'Beobachtungen'}`;
+  const wannHer = tage === 0 ? 'von heute' : `seit ${tage} ${tage === 1 ? 'Tag' : 'Tagen'}`;
+  exportReminderText.textContent = seit
+    ? `${wieViele} ${wannHer} noch nicht exportiert.`
+    : `${wieViele} erfasst, noch nie exportiert.`;
+  exportReminder.hidden = false;
 }
 
 // ---------- Init ----------
@@ -673,6 +736,7 @@ async function renderList() {
   ).length;
   progressSummary.textContent = `${gesamt} gespeichert (${mitStandort} mit WC-Standort) — Ziel: ${ZIEL_GESAMT} / ${ZIEL_MIT_STANDORT}`;
   headerProgress.textContent = `${gesamt}/${ZIEL_GESAMT}`;
+  updateExportReminder(entries);
 
   entriesList.innerHTML = '';
   if (entries.length === 0) {
@@ -822,6 +886,11 @@ exportButton.addEventListener('click', async () => {
         title: 'Wickelkompass Beobachtungen',
         text: `${entries.length} Beobachtung(en) aus der Feld-Erfassung.`,
       });
+      // Nur nach tatsaechlich abgeschlossenem Teilen -- ein Abbruch unten
+      // faellt in den AbortError-Zweig und darf die Erinnerung NICHT
+      // zuruecksetzen, sonst wiegt sie in falscher Sicherheit.
+      merkeExport();
+      await renderList();
       return;
     } catch (err) {
       if (err && err.name === 'AbortError') return; // Nutzer hat abgebrochen
@@ -831,10 +900,14 @@ exportButton.addEventListener('click', async () => {
 
   downloadBlob(csvBlob, csvFile.name);
   for (const f of photoFiles) downloadBlob(f, f.name);
+  merkeExport();
+  await renderList();
   alert(
     `${filesToShare.length} Datei(en) heruntergeladen. Bitte manuell per Mail/WhatsApp anhängen.`
   );
 });
+
+exportReminderButton.addEventListener('click', () => exportButton.click());
 
 // "Alle löschen": zweiter Tap zur Bestätigung statt native confirm(), danach
 // ebenfalls per Undo-Toast rueckgaengig machbar (Snapshot vorher im Speicher).
