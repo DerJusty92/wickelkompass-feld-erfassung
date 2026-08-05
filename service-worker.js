@@ -17,7 +17,7 @@
  * Versionsnummer im CACHE-Namen hochzaehlen, wenn sich App-Shell-Dateien
  * aendern -- dann werden alte Caches beim Aktivieren entfernt.
  */
-const CACHE = 'wk-feld-erfassung-v6';
+const CACHE = 'wk-feld-erfassung-v7';
 const TIMEOUT_MS = 3000;
 
 const ASSETS = [

@@ -77,11 +77,16 @@ Erweiterungen gegenüber dem Papier-Bogen:
   beides sind nur Vorschläge. Offline bleiben die Felder leer,
   GPS-Koordinaten werden trotzdem gespeichert.
 - **Umkreissuche** (OpenStreetMap Overpass, kostenlos, kein Key): zeigt nach
-  GPS-Erfassung bis zu 6 nahegelegene benannte Orte (< 40 m) zum Antippen —
-  füllt Ort-Name (und Adresse, falls vorhanden) direkt aus. Zwei
-  Overpass-Spiegel mit Timeout hintereinander probiert, da der kostenlose
-  Dienst gelegentlich überlastet ist (kein SLA) — schlägt in dem Fall
-  einfach fehl, ohne die App zu stören, manuelle Eingabe bleibt möglich.
+  GPS-Erfassung bis zu 8 nahegelegene Orte (< 70 m) zum Antippen — füllt
+  Ort-Name (und Adresse, falls vorhanden) direkt aus. Abgefragt werden nur
+  Elemente mit POI-Tag (`amenity`, `shop`, `tourism`, `leisure`, `office`,
+  `healthcare`); ein blosses `[name]` würde jede benannte **Straße** treffen
+  und die eigentlichen Orte verdrängen — genau das war auf dem Handy zu
+  sehen. Straßenmöbel (Automaten, Bänke, Parkplätze) und Denkmäler sind über
+  `KATEGORIE_AUSGESCHLOSSEN` in `app.js` ausgenommen. Zwei Overpass-Spiegel,
+  bei Bedarf zwei Runden mit Pause: im Test war der erste Anlauf regelmäßig
+  erfolglos und der zweite erfolgreich. Klappt gar nichts, sagt die Liste das
+  und die manuelle Eingabe funktioniert unverändert.
 - **Duplikat-Warnung**: liegt der neue GPS-Punkt < 30 m von einer bereits
   gespeicherten Beobachtung entfernt, erscheint ein Hinweis mit Ortsname und
   Datum — rein lokal, kein Netzwerk-Call. Blockiert nichts, nur ein Hinweis.
@@ -107,9 +112,62 @@ Erweiterungen gegenüber dem Papier-Bogen:
   Client-PWA landen), nicht hier. Eine echte Places-Integration mit
   Zusatzinfos braucht vorher eine eigene ADR im Hauptrepo.
 
+## Mehrere Wickelmöglichkeiten am selben Ort
+
+Große Standorte haben oft mehrere (Kaufhaus: Wickelraum im 2. OG, Wickeltisch
+im Damen-WC im EG). Erfassung: **eine Beobachtung pro Möglichkeit**,
+unterschieden über das Feld `bereich` (Bereich/Stockwerk). Nach dem Speichern
+bietet der Toast „+ Weitere hier" an — das übernimmt Ort, Adresse, GPS und
+Bezirk und leert nur den wickeltischspezifischen Teil.
+
+Das passt zur Regel „ein Datensatz pro Attribut" aus dem Erhebungsbogen und
+hält die Verfallslogik intakt.
+
+## Bearbeiten
+
+Jeder Eintrag hat neben dem Löschen-Kreuz einen Stift. Der lädt ihn zurück
+ins Formular; ein blauer Hinweis oben zeigt den Bearbeitungsmodus, der
+Speichern-Knopf heißt dann „Änderungen speichern". Ein vorhandenes Foto
+bleibt erhalten, solange kein neues aufgenommen wird.
+
+Bearbeitete Einträge zählen wieder in die Export-Erinnerung — eine Korrektur
+an einem bereits exportierten Eintrag liefe sonst nie in einen neuen Export.
+
+## Entwurf
+
+Die Eingaben werden laufend als Entwurf gesichert (nicht das Foto — dafür ist
+localStorage zu klein). Wird die App mitten in der Eingabe geschlossen, ist
+beim nächsten Start alles wieder da, inklusive erfasstem Standort. Ein
+Hinweis oben sagt das und bietet „Verwerfen" an.
+
+## Hell / Dunkel
+
+Umschalter oben rechts. Ohne eigene Wahl entscheidet das Gerät. Der helle
+Modus ist bei Feldarbeit in der Sonne die brauchbarere Variante.
+
+## Abdeckung nach Stadtbezirk
+
+Eigener Block mit Balken je Bezirk in der Prioritätsreihenfolge aus
+`stadtteil-priorisierung.md` — zeigt auf einen Blick, wo noch nichts erfasst
+ist. Eine richtige Karte mit Straßen ist das bewusst nicht: dafür müsste eine
+Kartenbibliothek ins Repo, und das widerspräche „keine Abhängigkeiten". Wer
+eine Karte will, nimmt den GeoJSON-Export (Knopf im Export-Block) und öffnet
+ihn in einer beliebigen Kartenanwendung.
+
 ## Export
 
-Button „Exportieren / Teilen" baut eine CSV (Spalten wie
+Zwei Wege, bewusst getrennt:
+
+- **Teilen** öffnet das Teilen-Menü des Geräts. Der Aufruf enthält
+  **ausschließlich Dateien**, keinen Text und keinen Titel: etliche
+  Android-Ziele (WhatsApp voran) nehmen sonst den Text und lassen die
+  Dateien fallen — die Freigabe meldet Erfolg, im Chat kommt nur Text an.
+  Ob das Ziel die Dateien tatsächlich übernommen hat, lässt sich von der
+  Seite aus nicht feststellen, deshalb weist ein Hinweis darauf hin.
+- **Herunterladen** legt die Dateien lokal ab. Umständlicher, aber
+  zuverlässig — der Weg, wenn beim Teilen nur Text ankommt.
+
+Button „Teilen" baut eine CSV (Spalten wie
 `docs/erhebung/beobachtungen.csv` im Hauptrepo, plus `lat`/`lon`/
 `google_maps_link`/`uhrzeit`/`zugang`/`kostenpflichtig`/`zustand` am Ende —
 die werden vom dortigen Auswertungsskript ignoriert, da es Spalten über den

@@ -10,12 +10,64 @@
   --danger-dark: #b91c1c;
   --ok: #16a34a;
   --border: #334155;
+  --warn-bg: rgba(245, 158, 11, 0.15);
+  --warn-border: #f59e0b;
+  --warn-text: #fde68a;
+  --warn-action-text: #1f2937;
+  --danger-bg: rgba(220, 38, 38, 0.15);
+  --danger-text: #fecaca;
   color-scheme: dark;
+}
+
+/* Heller Modus. Feldarbeit findet draussen statt -- bei Sonne ist Dunkel
+   die schlechtere Wahl. Ohne gespeicherte Wahl entscheidet das Geraet,
+   data-theme am <html> gewinnt in beide Richtungen. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #f1f5f9;
+    --surface: #ffffff;
+    --surface-alt: #e2e8f0;
+    --text: #0f172a;
+    --text-muted: #475569;
+    --border: #cbd5e1;
+    --warn-bg: #fef3c7;
+    --warn-border: #d97706;
+    --warn-text: #78350f;
+    --warn-action-text: #ffffff;
+    --danger-bg: #fee2e2;
+    --danger-text: #7f1d1d;
+    color-scheme: light;
+  }
+}
+
+:root[data-theme='light'] {
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --surface-alt: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #475569;
+  --border: #cbd5e1;
+  --warn-bg: #fef3c7;
+  --warn-border: #d97706;
+  --warn-text: #78350f;
+  --warn-action-text: #ffffff;
+  --danger-bg: #fee2e2;
+  --danger-text: #7f1d1d;
+  color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Muss ganz oben stehen und !important sein: eigene display-Regeln
+   (display:flex an den Bannern, display:block an der Fotovorschau) haben
+   hoehere Spezifitaet als das [hidden] des Browsers und wuerden versteckte
+   Elemente sonst trotzdem anzeigen. Genau das ist passiert -- leere Banner
+   und der Alt-Text der Fotovorschau waren dauerhaft sichtbar. */
+[hidden] {
+  display: none !important;
 }
 
 body {
@@ -56,6 +108,13 @@ body {
   font-size: 0.78rem;
 }
 
+.header-rechts {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .header-badge {
   flex-shrink: 0;
   background: var(--accent);
@@ -64,6 +123,96 @@ body {
   font-weight: 700;
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
+}
+
+.icon-button {
+  width: auto;
+  min-height: unset;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Hinweise oben im Formular: Bearbeitungsmodus und wiederhergestellter
+   Entwurf. Beide muessen sofort erkennbar sein, weil sie erklaeren, warum
+   das Formular nicht leer ist. */
+.edit-hinweis,
+.entwurf-hinweis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.83rem;
+  margin-bottom: 1rem;
+}
+
+.edit-hinweis {
+  background: rgba(37, 99, 235, 0.15);
+  border: 1px solid var(--accent);
+  color: var(--text);
+}
+
+.edit-hinweis .reminder-action {
+  background: var(--accent);
+  color: white;
+}
+
+.entwurf-hinweis {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+}
+
+/* Abdeckung nach Stadtbezirk */
+.abdeckung-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.abdeckung-kopf {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  margin-bottom: 0.25rem;
+}
+
+.abdeckung-wert {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.abdeckung-zeile.leer .abdeckung-kopf {
+  color: var(--text-muted);
+}
+
+.abdeckung-balken {
+  height: 6px;
+  background: var(--surface-alt);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.abdeckung-fuellung {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.btn-block {
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
 main {
@@ -83,9 +232,9 @@ main {
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid #f59e0b;
-  color: #fde68a;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
   border-radius: 12px;
   padding: 0.75rem 0.9rem;
   font-size: 0.85rem;
@@ -95,8 +244,8 @@ main {
   width: auto;
   min-height: unset;
   flex-shrink: 0;
-  background: #f59e0b;
-  color: #1f2937;
+  background: var(--warn-border);
+  color: var(--warn-action-text);
   border-radius: 999px;
   padding: 0.45rem 0.9rem;
   font-size: 0.82rem;
@@ -168,9 +317,9 @@ textarea {
 }
 
 .form-error {
-  background: rgba(220, 38, 38, 0.15);
+  background: var(--danger-bg);
   border: 1px solid var(--danger);
-  color: #fecaca;
+  color: var(--danger-text);
   border-radius: 10px;
   padding: 0.6rem 0.75rem;
   font-size: 0.85rem;
@@ -268,9 +417,9 @@ button:active {
 .dup-warning {
   margin: 0.6rem 0 0;
   padding: 0.5rem 0.7rem;
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid #f59e0b;
-  color: #fde68a;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
   border-radius: 8px;
   font-size: 0.82rem;
 }
@@ -392,14 +541,29 @@ button:active {
   color: white;
 }
 
-.entry-delete {
+.entry-aktionen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.entry-delete,
+.entry-edit {
   width: auto;
   min-height: unset;
   background: transparent;
-  color: var(--danger);
   border: none;
-  padding: 0.2rem 0.4rem;
+  padding: 0.25rem 0.45rem;
   font-size: 1.1rem;
+}
+
+.entry-delete {
+  color: var(--danger);
+}
+
+.entry-edit {
+  color: var(--accent);
 }
 
 .empty-state {

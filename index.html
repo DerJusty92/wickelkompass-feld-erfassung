@@ -21,7 +21,10 @@
       <h1>Wickelkompass</h1>
       <p class="subtitle">Felderfassung · Daten bleiben auf diesem Gerät</p>
     </div>
-    <span id="header-progress" class="header-badge">0/150</span>
+    <div class="header-rechts">
+      <button type="button" id="theme-toggle" class="icon-button" aria-label="Helligkeit umschalten" title="Hell / Dunkel">🌙</button>
+      <span id="header-progress" class="header-badge">0/150</span>
+    </div>
   </div>
 </header>
 
@@ -35,6 +38,16 @@
     <h2 id="form-heading">Neue Beobachtung</h2>
     <form id="entry-form" novalidate>
       <p id="form-error" class="form-error" hidden></p>
+
+      <div id="edit-hinweis" class="edit-hinweis" hidden>
+        <span id="edit-hinweis-text"></span>
+        <button type="button" id="edit-abbrechen" class="reminder-action">Abbrechen</button>
+      </div>
+
+      <div id="entwurf-hinweis" class="entwurf-hinweis" hidden>
+        <span>Entwurf wiederhergestellt (ein Foto muss neu aufgenommen werden).</span>
+        <button type="button" id="entwurf-verwerfen" class="reminder-action">Verwerfen</button>
+      </div>
 
       <div class="field-row">
         <div class="field">
@@ -130,6 +143,16 @@
       </div>
 
       <div class="field">
+        <label for="bereich">Bereich / Stockwerk (optional)</label>
+        <input type="text" id="bereich" name="bereich" autocomplete="off" placeholder="z. B. 2. OG neben Spielwaren" />
+        <p class="hint">
+          Bei mehreren Wickelmöglichkeiten am selben Ort: je eine Beobachtung
+          pro Möglichkeit, unterschieden über dieses Feld. Nach dem Speichern
+          bietet die App an, die nächste am selben Ort zu erfassen.
+        </p>
+      </div>
+
+      <div class="field">
         <label id="zugang-label">Zugänglichkeit (optional)</label>
         <div class="chip-group" role="radiogroup" aria-labelledby="zugang-label" data-field="zugang">
           <button type="button" class="chip" data-value="frei">Frei zugänglich</button>
@@ -185,6 +208,12 @@
     <ul id="entries-list" class="entries-list"></ul>
   </section>
 
+  <section class="card" aria-labelledby="abdeckung-heading">
+    <h2 id="abdeckung-heading">Abdeckung nach Stadtbezirk</h2>
+    <p class="hint">Reihenfolge wie in <code>stadtteil-priorisierung.md</code> — zeigt, wo noch nichts erfasst ist.</p>
+    <ul id="abdeckung-liste" class="abdeckung-liste"></ul>
+  </section>
+
   <section class="card" aria-labelledby="export-heading">
     <h2 id="export-heading">Exportieren</h2>
     <p class="hint">
@@ -194,7 +223,14 @@
       manuellen Anhängen.
     </p>
     <p id="storage-warning" class="dup-warning" hidden></p>
-    <button type="button" id="export-button" class="btn-primary btn-pill">📤 Exportieren / Teilen</button>
+    <button type="button" id="export-button" class="btn-primary btn-pill">📤 Teilen (Mail, WhatsApp …)</button>
+    <button type="button" id="download-button" class="btn-secondary btn-block">⬇️ Stattdessen herunterladen</button>
+    <p class="hint">
+      Kommt beim Teilen in WhatsApp nur Text an und keine Datei? Das passiert
+      bei manchen Android-Zielen. Dann „Herunterladen" nehmen und die Datei
+      im Chat von Hand anhängen — das klappt immer.
+    </p>
+    <button type="button" id="geojson-button" class="btn-secondary btn-block">🗺️ Als GeoJSON (für Kartenapps)</button>
     <button type="button" id="clear-button" class="btn-danger">Alle Einträge löschen</button>
   </section>
 </main>
