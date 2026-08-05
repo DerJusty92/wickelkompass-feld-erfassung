@@ -106,14 +106,44 @@ async function addEntry(entry) {
   });
 }
 
+// Wertumbenennungen. Am 05.08.2026 wurde 'unisex' auf die OSM-Schreibweise
+// 'unisex_toilet' umgestellt. Eintraege, die vorher auf einem Geraet
+// erfasst wurden, wuerden sonst mit einem Wert exportiert, den weder der
+// Erhebungsbogen noch OSM kennt -- still und unbemerkt.
+const WERT_MIGRATION = { changing_table_location: { unisex: 'unisex_toilet' } };
+
+function migriereEintrag(entry) {
+  let geaendert = false;
+  for (const [feld, abbildung] of Object.entries(WERT_MIGRATION)) {
+    const alt = entry[feld];
+    if (alt && abbildung[alt]) {
+      entry[feld] = abbildung[alt];
+      geaendert = true;
+    }
+  }
+  return geaendert;
+}
+
 async function getAllEntries() {
   const db = await openDb();
-  return new Promise((resolve, reject) => {
+  const eintraege = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
     const req = tx.objectStore(STORE).getAll();
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+
+  // Beim Lesen migrieren und die Korrektur gleich zurueckschreiben, damit
+  // sie nicht bei jedem Aufruf erneut anfaellt.
+  const zuSchreiben = eintraege.filter(migriereEintrag);
+  for (const e of zuSchreiben) {
+    try {
+      await putEntry(e);
+    } catch (err) {
+      console.warn('Wertmigration konnte nicht gespeichert werden.', err);
+    }
+  }
+  return eintraege;
 }
 
 async function deleteEntry(id) {
