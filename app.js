@@ -32,6 +32,40 @@ const LS_LETZTER_EXPORT = 'wk-letzter-export';
 const LS_ENTWURF = 'wk-entwurf';
 const LS_THEME = 'wk-theme';
 
+// Gemeinsamer Feldkatalog fuer CSV-Export UND Direktversand -- eine
+// Aenderung hier zieht automatisch beide Wege nach. Muss mit FELDER in
+// google-apps-script/Code.gs uebereinstimmen (kein Build-Schritt haelt das
+// automatisch synchron, siehe Kommentar dort).
+const EXPORT_HEADER = [
+  'datum',
+  'ort_name',
+  'adresse',
+  'stadtbezirk',
+  'changing_table',
+  'changing_table_location',
+  'stroller_access',
+  'notiz',
+  'quelle',
+  'lat',
+  'lon',
+  'google_maps_link',
+  'uhrzeit',
+  'zugang',
+  'kostenpflichtig',
+  'zustand',
+  'bereich',
+];
+
+// Direktversand an Jonathan statt Mail/WhatsApp (siehe
+// google-apps-script/README.md). Die URL und das Secret sind bewusst
+// oeffentlich im Client-Code sichtbar -- das Secret ist nur ein
+// Grundrauschen-Filter, kein echter Schutz (siehe Session-Notizen zum
+// Bedrohungsmodell). Bei Missbrauch: neues Deployment in Apps Script,
+// Werte hier austauschen.
+const DIREKTSENDEN_URL = 'https://script.google.com/macros/s/AKfycbyxuux5DRarVv0IRoS5DtEXfO96j1F1lq9AYM8KJoWFNDRZS9avtumhyQrFmlQW5R0uYQ/exec';
+const DIREKTSENDEN_SECRET = 'd3unrxN2mluC9sjRy_sfWxTgw1wJodY0';
+const DIREKTSENDEN_TIMEOUT_MS = 15000;
+
 const STADTBEZIRKE = [
   'Altstadt/Lehel',
   'Ludwigsvorstadt/Isarvorstadt',
@@ -222,6 +256,23 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+// Fuer den Direktversand: der Apps-Script-Endpunkt bekommt Fotos als
+// Base64-String statt als rohe Datei im FormData -- ein rohes Datei-Feld
+// aus einem externen fetch()-Aufruf kommt in doPost() nicht als Blob an
+// (nur bei Formularen, die Apps Script selbst ausliefert). Siehe
+// google-apps-script/Code.gs.
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const commaIndex = reader.result.indexOf(',');
+      resolve(reader.result.slice(commaIndex + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -262,6 +313,8 @@ const exportButton = document.getElementById('export-button');
 const clearButton = document.getElementById('clear-button');
 const bereichInput = document.getElementById('bereich');
 const downloadButton = document.getElementById('download-button');
+const direktsendenButton = document.getElementById('direktsenden-button');
+const direktsendenStatus = document.getElementById('direktsenden-status');
 const geojsonButton = document.getElementById('geojson-button');
 const themeToggle = document.getElementById('theme-toggle');
 const abdeckungListe = document.getElementById('abdeckung-liste');
@@ -1370,28 +1423,9 @@ async function exportDateienBauen() {
   const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
   if (entries.length === 0) return null;
 
-  const header = [
-    'datum',
-    'ort_name',
-    'adresse',
-    'stadtbezirk',
-    'changing_table',
-    'changing_table_location',
-    'stroller_access',
-    'notiz',
-    'quelle',
-    'lat',
-    'lon',
-    'google_maps_link',
-    'uhrzeit',
-    'zugang',
-    'kostenpflichtig',
-    'zustand',
-    'bereich',
-  ];
-  const lines = [header.join(';')];
+  const lines = [EXPORT_HEADER.join(';')];
   for (const e of entries) {
-    lines.push(header.map((key) => csvEscape(e[key])).join(';'));
+    lines.push(EXPORT_HEADER.map((key) => csvEscape(e[key])).join(';'));
   }
   const csvText = lines.join('\n') + '\n';
   // BOM voran, sonst zeigt Excel die Umlaute als Krautsalat. Wer die Zeilen
@@ -1466,6 +1500,89 @@ downloadButton.addEventListener('click', async () => {
   merkeExport();
   await renderList();
   showToast(`${1 + paket.photoFiles.length} Datei(en) heruntergeladen.`);
+});
+
+// Direktversand: schickt jede Beobachtung einzeln an den Apps-Script-
+// Endpunkt (siehe google-apps-script/README.md) -- Alternative zu
+// Teilen/Herunterladen, ohne Mail/WhatsApp als Zwischenschritt. Bricht bei
+// Tageslimit oder einem Fehler ab, statt endlos weiterzuversuchen, und
+// verweist auf die bestehenden Wege fuer den Rest.
+async function direktsendenEintrag(entry) {
+  const formData = new FormData();
+  formData.append('secret', DIREKTSENDEN_SECRET);
+  for (const key of EXPORT_HEADER) formData.append(key, entry[key] ?? '');
+  if (entry.foto) {
+    formData.append('foto_base64', await blobToBase64(entry.foto));
+    formData.append('foto_mimetype', entry.fotoType || 'image/jpeg');
+    formData.append(
+      'foto_filename',
+      [entry.datum, slugify(entry.ort_name), String(entry.id).slice(-6)].filter(Boolean).join('_') + '.jpg'
+    );
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DIREKTSENDEN_TIMEOUT_MS);
+  try {
+    const response = await fetch(DIREKTSENDEN_URL, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    return await response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+direktsendenButton.addEventListener('click', async () => {
+  const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
+  if (entries.length === 0) {
+    showToast('Keine Beobachtungen gespeichert.', { variant: 'error' });
+    return;
+  }
+
+  direktsendenButton.disabled = true;
+  direktsendenStatus.hidden = false;
+  direktsendenStatus.textContent = `Sende 0 / ${entries.length} …`;
+
+  let erfolge = 0;
+  let abbruchGrund = null;
+
+  for (let i = 0; i < entries.length; i++) {
+    direktsendenStatus.textContent = `Sende ${i + 1} / ${entries.length} …`;
+    try {
+      const ergebnis = await direktsendenEintrag(entries[i]);
+      if (ergebnis && ergebnis.ok) {
+        erfolge++;
+      } else if (ergebnis && ergebnis.reason === 'limit_exceeded') {
+        abbruchGrund = 'Tageslimit erreicht';
+        break;
+      } else {
+        abbruchGrund = `Serverfehler (${(ergebnis && ergebnis.reason) || 'unbekannt'})`;
+        break;
+      }
+    } catch (err) {
+      console.warn('Direktversand fehlgeschlagen.', err);
+      abbruchGrund = err && err.name === 'AbortError' ? 'Zeitüberschreitung' : 'Netzwerkfehler';
+      break;
+    }
+  }
+
+  direktsendenButton.disabled = false;
+
+  if (erfolge === entries.length) {
+    direktsendenStatus.hidden = true;
+    merkeExport();
+    await renderList();
+    showToast(`✓ ${erfolge} ${erfolge === 1 ? 'Beobachtung' : 'Beobachtungen'} direkt gesendet.`);
+    return;
+  }
+
+  const rest = entries.length - erfolge;
+  direktsendenStatus.textContent =
+    `${erfolge} von ${entries.length} gesendet. ${abbruchGrund ? abbruchGrund + ' — ' : ''}` +
+    `Restliche ${rest} bitte über „Teilen" oder „Herunterladen" senden.`;
+  showToast('Direktsenden unvollständig — siehe Hinweis unten.', { variant: 'error', durationMs: 5000 });
 });
 
 // GeoJSON: oeffnet sich in praktisch jeder Kartenanwendung (Organic Maps,

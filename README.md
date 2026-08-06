@@ -18,18 +18,32 @@ Wickelkompass-Repo.
 eigenen erfassten Daten.** Drei getrennte Dinge:
 
 1. GitHub Pages liefert aus diesem Repo ausschließlich statische Dateien
-   aus. Kein Backend, keine Datenbank — es gibt keinen Ort, an dem
-   eingegebene Beobachtungen hier ankommen könnten.
+   aus. Kein eigenes Backend, keine eigene Datenbank.
 2. Alle erfassten Daten (Ort, Adresse, GPS, Notizen, Fotos) liegen
-   ausschließlich lokal im Browser des jeweiligen Geräts (IndexedDB). Der
-   Code enthält keinen einzigen Netzwerk-Call, der diese Daten irgendwohin
-   sendet.
-3. Die automatischen Netzwerk-Calls sind der optionale Stadtbezirk-/Adress-
-   Vorschlag (OpenStreetMap Nominatim) und die Umkreissuche (OpenStreetMap
-   Overpass), beide nur nach GPS-Erfassung ausgelöst — dabei gehen
-   ausschließlich rohe GPS-Koordinaten raus, keine Ortsnamen, keine Notizen,
-   keine Fotos. Export passiert nur auf expliziten Klick, über das
-   Teilen-Menü des Geräts oder als lokaler Download — nie automatisch.
+   zunächst ausschließlich lokal im Browser des jeweiligen Geräts
+   (IndexedDB). Kein Code hier sendet sie automatisch irgendwohin — jeder
+   Versand ist ein expliziter Klick auf einen der drei Export-Knöpfe
+   (siehe Punkt 3).
+3. Die automatischen Netzwerk-Calls *ohne* Nutzerdaten sind der optionale
+   Stadtbezirk-/Adress-Vorschlag (OpenStreetMap Nominatim) und die
+   Umkreissuche (OpenStreetMap Overpass), beide nur nach GPS-Erfassung
+   ausgelöst — dabei gehen ausschließlich rohe GPS-Koordinaten raus, keine
+   Ortsnamen, keine Notizen, keine Fotos.
+
+   Export der eigentlichen Beobachtungen passiert ausschließlich auf
+   expliziten Klick, nie automatisch, über einen von drei Wegen:
+   - **Teilen** (Web-Share-API, z. B. Mail/WhatsApp) oder
+   - **Herunterladen** (lokale Datei) — beide bleiben rein
+     geräteseitig/nutzergesteuert, wie bisher, oder
+   - **Direkt senden**: schickt jede Beobachtung per `fetch()` an ein
+     privates Google-Apps-Script-Web-App (Details und Bedrohungsmodell in
+     `google-apps-script/README.md`). Landet in einem Sheet/Drive-Ordner,
+     auf den nur Jonathan Zugriff hat — kein Lesezugriff für Dritte, da
+     der Endpunkt bewusst nur einen Schreibpfad anbietet. Die Ziel-URL und
+     ein schwaches Secret stehen sichtbar in `app.js`, weil sich in einer
+     rein statischen, öffentlichen PWA kein echtes Geheimnis verstecken
+     lässt — das Secret ist nur ein Grundrauschen-Filter, kein
+     Zugriffsschutz.
 
 ## Vanilla, keine Abhängigkeiten
 
@@ -156,7 +170,7 @@ ihn in einer beliebigen Kartenanwendung.
 
 ## Export
 
-Zwei Wege, bewusst getrennt:
+Drei Wege, bewusst getrennt:
 
 - **Teilen** öffnet das Teilen-Menü des Geräts. Der Aufruf enthält
   **ausschließlich Dateien**, keinen Text und keinen Titel: etliche
@@ -166,6 +180,14 @@ Zwei Wege, bewusst getrennt:
   Seite aus nicht feststellen, deshalb weist ein Hinweis darauf hin.
 - **Herunterladen** legt die Dateien lokal ab. Umständlicher, aber
   zuverlässig — der Weg, wenn beim Teilen nur Text ankommt.
+- **Direkt senden** schickt jede gespeicherte Beobachtung einzeln per
+  `fetch()` an ein privates Google-Apps-Script-Web-App (siehe
+  `google-apps-script/README.md`) — kein Mail/WhatsApp als Zwischenschritt
+  nötig, gedacht für Mitstreiter:innen, die selbst erheben. Bricht bei
+  einem Fehler (kein Netz, Tageslimit erreicht, o. Ä.) ab und zeigt genau,
+  wie viele Beobachtungen durchkamen; der Rest bleibt unverändert lokal
+  gespeichert und kann jederzeit über Teilen/Herunterladen nachgeliefert
+  werden.
 
 Button „Teilen" baut eine CSV (Spalten wie
 `docs/erhebung/beobachtungen.csv` im Hauptrepo, plus `lat`/`lon`/
