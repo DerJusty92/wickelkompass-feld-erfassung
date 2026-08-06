@@ -17,8 +17,6 @@
 const DB_NAME = 'wk-feld-erfassung';
 const DB_VERSION = 1;
 const STORE = 'beobachtungen';
-const ZIEL_GESAMT = 150;
-const ZIEL_MIT_STANDORT = 100;
 const DUPLIKAT_RADIUS_M = 30;
 const UNDO_FRIST_MS = 5000;
 const CLEAR_UNDO_MS = 9000;
@@ -28,7 +26,6 @@ const CLEAR_UNDO_MS = 9000;
 // bewusst niedrig -- lieber einmal zu oft erinnert als eine Safari verloren.
 const ERINNERUNG_EINTRAEGE = 10;
 const ERINNERUNG_TAGE = 7;
-const LS_LETZTER_EXPORT = 'wk-letzter-export';
 const LS_ENTWURF = 'wk-entwurf';
 const LS_THEME = 'wk-theme';
 
@@ -307,8 +304,6 @@ const gpsMapWrap = document.getElementById('gps-map-wrap');
 const gpsMapFrame = document.getElementById('gps-map');
 const gpsMapLink = document.getElementById('gps-map-link');
 const entriesList = document.getElementById('entries-list');
-const progressSummary = document.getElementById('progress-summary');
-const headerProgress = document.getElementById('header-progress');
 const exportButton = document.getElementById('export-button');
 const clearButton = document.getElementById('clear-button');
 const bereichInput = document.getElementById('bereich');
@@ -317,7 +312,6 @@ const direktsendenButton = document.getElementById('direktsenden-button');
 const direktsendenStatus = document.getElementById('direktsenden-status');
 const geojsonButton = document.getElementById('geojson-button');
 const themeToggle = document.getElementById('theme-toggle');
-const abdeckungListe = document.getElementById('abdeckung-liste');
 const editHinweis = document.getElementById('edit-hinweis');
 const editHinweisText = document.getElementById('edit-hinweis-text');
 const editAbbrechen = document.getElementById('edit-abbrechen');
@@ -588,60 +582,42 @@ entwurfVerwerfen.addEventListener('click', () => {
 
 // ---------- Export-Erinnerung ----------
 
-// Die id beginnt mit Date.now() -- daraus laesst sich ableiten, welche
-// Eintraege nach dem letzten Export dazugekommen sind, ohne dass ein
-// zusaetzlicher Zaehler mit geloeschten Eintraegen aus dem Tritt geraet.
+// Die id beginnt mit Date.now() -- daraus laesst sich das Erfassungsdatum
+// ableiten, ohne einen separaten Zeitstempel mitzufuehren.
 function erstelltAm(entry) {
   const ms = Number(String(entry.id).split('-')[0]);
   return Number.isFinite(ms) ? ms : 0;
-}
-
-function letzterExport() {
-  const roh = Number(localStorage.getItem(LS_LETZTER_EXPORT));
-  return Number.isFinite(roh) && roh > 0 ? roh : null;
-}
-
-function merkeExport() {
-  try {
-    localStorage.setItem(LS_LETZTER_EXPORT, String(Date.now()));
-  } catch (err) {
-    console.warn('Export-Zeitpunkt konnte nicht gemerkt werden.', err);
-  }
 }
 
 function tageSeit(ms) {
   return Math.floor((Date.now() - ms) / 86400000);
 }
 
-// Eine Aenderung an einem bereits exportierten Eintrag muss ebenfalls in den
-// naechsten Export -- deshalb zaehlt der spaetere der beiden Zeitpunkte.
-function zuletztBeruehrt(entry) {
-  return Math.max(erstelltAm(entry), Number(entry.geaendert_am) || 0);
-}
-
+// Seit es pro Eintrag ein echtes "versendet"-Flag gibt (automatisches
+// Senden beim Speichern, siehe sendeEinzeln()), ist die Erinnerung direkt
+// daran gekoppelt statt an einen globalen "letzter Export"-Zeitstempel:
+// sie fragt schlicht "liegt hier etwas, das das Geraet noch nicht auf
+// irgendeinem Weg verlassen hat" -- Teilen/Herunterladen markieren
+// erfolgreich verschickte Eintraege ebenfalls als versendet (siehe
+// export-button/download-button), zaehlen also nicht mehr mit.
 function updateExportReminder(entries) {
-  const seit = letzterExport();
-  const neue = entries.filter((e) => zuletztBeruehrt(e) > (seit ?? 0));
+  const offen = entries.filter((e) => !e.versendet);
 
-  if (neue.length === 0) {
+  if (offen.length === 0) {
     exportReminder.hidden = true;
     return;
   }
 
-  // Ohne vorherigen Export zaehlt das Alter des aeltesten Eintrags.
-  const bezug = seit ?? Math.min(...neue.map(zuletztBeruehrt));
-  const tage = tageSeit(bezug);
+  const tage = tageSeit(Math.min(...offen.map(erstelltAm)));
 
-  if (neue.length < ERINNERUNG_EINTRAEGE && tage < ERINNERUNG_TAGE) {
+  if (offen.length < ERINNERUNG_EINTRAEGE && tage < ERINNERUNG_TAGE) {
     exportReminder.hidden = true;
     return;
   }
 
-  const wieViele = `${neue.length} ${neue.length === 1 ? 'Beobachtung' : 'Beobachtungen'}`;
+  const wieViele = `${offen.length} ${offen.length === 1 ? 'Beobachtung' : 'Beobachtungen'}`;
   const wannHer = tage === 0 ? 'von heute' : `seit ${tage} ${tage === 1 ? 'Tag' : 'Tagen'}`;
-  exportReminderText.textContent = seit
-    ? `${wieViele} ${wannHer} noch nicht exportiert.`
-    : `${wieViele} erfasst, noch nie exportiert.`;
+  exportReminderText.textContent = `${wieViele} noch nicht gesendet (${wannHer}).`;
   exportReminder.hidden = false;
 }
 
@@ -1050,10 +1026,10 @@ form.addEventListener('submit', async (event) => {
     lon: currentPosition ? currentPosition.lon : '',
     foto: foto || null,
     fotoType: foto ? foto.type : '',
-    // Nur beim Bearbeiten gesetzt. Die Export-Erinnerung zaehlt danach:
-    // sonst bliebe eine Korrektur an einem bereits exportierten Eintrag
-    // unbemerkt und liefe nie in einen neuen Export.
-    ...(editingId ? { geaendert_am: Date.now() } : {}),
+    // versendet bewusst NICHT hier gesetzt (auch beim Bearbeiten nicht):
+    // ein frisch gespeicherter oder geaenderter Eintrag gilt erst als
+    // versendet, nachdem sendeEinzeln() das unten tatsaechlich bestaetigt
+    // -- siehe direkt nach formularZuruecksetzen().
   };
 
   try {
@@ -1088,13 +1064,30 @@ form.addEventListener('submit', async (event) => {
   formularZuruecksetzen();
   entwurfLoeschen();
 
+  // Direkt nach dem Speichern wird sofort versucht, die Beobachtung zu
+  // senden -- Mitstreiter:innen im Feld sollen nicht zusaetzlich an einen
+  // zweiten Knopf denken muessen. Klappt es nicht (kein Netz o. Ae.),
+  // bleibt der Eintrag als "nicht gesendet" markiert und laesst sich ueber
+  // den Wiederholungsknopf im Versand-Bereich nachreichen.
+  const sendeErgebnis = await sendeEinzeln(entry);
+
   if (warBearbeitung) {
-    showToast(`✓ „${entry.ort_name}“ geändert`);
+    showToast(
+      sendeErgebnis.ok
+        ? `✓ „${entry.ort_name}“ geändert & gesendet`
+        : `✓ „${entry.ort_name}“ geändert — Versand fehlgeschlagen, später erneut versuchen`,
+      { durationMs: sendeErgebnis.ok ? 2200 : 5000 }
+    );
   } else {
-    showToast(`✓ „${entry.ort_name}“ gespeichert`, {
-      durationMs: 6000,
-      action: { label: '+ Weitere hier', onClick: () => weitereAmSelbenOrt(gemerkt) },
-    });
+    showToast(
+      sendeErgebnis.ok
+        ? `✓ „${entry.ort_name}“ gespeichert & gesendet`
+        : `✓ „${entry.ort_name}“ gespeichert — Versand fehlgeschlagen, später erneut versuchen`,
+      {
+        durationMs: sendeErgebnis.ok ? 6000 : 7000,
+        action: { label: '+ Weitere hier', onClick: () => weitereAmSelbenOrt(gemerkt) },
+      }
+    );
   }
   await renderList();
 });
@@ -1230,23 +1223,14 @@ async function renderList() {
     return String(b.id).localeCompare(String(a.id));
   });
 
-  const feldSurvey = entries.filter((e) => e.quelle === 'field_survey');
-  const gesamt = feldSurvey.length;
-  const mitStandort = feldSurvey.filter((e) => e.changing_table_location).length;
-  const negativbefunde = feldSurvey.filter((e) => e.changing_table === 'no').length;
-
-  // Kernziel ist die Zahl MIT WC-Standort, nicht die Gesamtzahl -- sie
-  // traegt das Alleinstellungsmerkmal. Negativbefunde haben eigenen Wert
-  // ("hier ist keiner" zeigt sonst niemand) und werden deshalb getrennt
-  // ausgewiesen statt gegen das Kernziel gerechnet.
-  headerProgress.textContent = `${mitStandort}/${ZIEL_MIT_STANDORT}`;
-  headerProgress.title = `${mitStandort} von ${ZIEL_MIT_STANDORT} Beobachtungen mit WC-Standort (Kernziel)`;
-  progressSummary.textContent =
-    `${mitStandort} / ${ZIEL_MIT_STANDORT} mit WC-Standort (Kernziel) · ` +
-    `${gesamt} / ${ZIEL_GESAMT} Beobachtungen · ` +
-    `${negativbefunde} ohne Wickeltisch`;
+  // Absichtlich KEINE Fortschritts-/Abdeckungszahlen mehr hier: dieses
+  // Geraet sieht nur seine eigenen, lokalen Eintraege der aktuellen Sitzung
+  // -- als Stellvertreter fuer den echten, projektweiten Fortschritt waeren
+  // die Zahlen irrefuehrend. Die echte Auswertung passiert zentral im
+  // Hauptrepo (scripts/erhebung-fortschritt.mjs) ueber alle eingesammelten
+  // Beobachtungen hinweg.
   updateExportReminder(entries);
-  renderAbdeckung(entries);
+  updateDirektsendenButton(entries);
 
   entriesList.innerHTML = '';
   if (entries.length === 0) {
@@ -1291,6 +1275,12 @@ async function renderList() {
       srcBadge.textContent = 'operator_reply';
       badges.appendChild(srcBadge);
     }
+    if (!e.versendet) {
+      const sendBadge = document.createElement('span');
+      sendBadge.className = 'badge';
+      sendBadge.textContent = '⏳ nicht gesendet';
+      badges.appendChild(sendBadge);
+    }
     main.appendChild(badges);
 
     const meta = document.createElement('div');
@@ -1322,61 +1312,6 @@ async function renderList() {
     li.appendChild(aktionen);
 
     entriesList.appendChild(li);
-  }
-}
-
-// Zeigt, wo noch nichts erfasst ist -- in der Prioritaetsreihenfolge aus
-// stadtteil-priorisierung.md, damit die Luecken sofort ins Auge fallen.
-function renderAbdeckung(entries) {
-  const feldSurvey = entries.filter((e) => e.quelle === 'field_survey');
-  const proBezirk = new Map();
-  for (const e of feldSurvey) {
-    const key = e.stadtbezirk || '(ohne Zuordnung)';
-    proBezirk.set(key, (proBezirk.get(key) || 0) + 1);
-  }
-  const maximum = Math.max(1, ...STADTBEZIRKE.map((b) => proBezirk.get(b) || 0));
-
-  abdeckungListe.innerHTML = '';
-  STADTBEZIRKE.forEach((bezirk, i) => {
-    const anzahl = proBezirk.get(bezirk) || 0;
-
-    const li = document.createElement('li');
-    li.className = `abdeckung-zeile${anzahl === 0 ? ' leer' : ''}`;
-
-    const kopf = document.createElement('div');
-    kopf.className = 'abdeckung-kopf';
-    const name = document.createElement('span');
-    name.textContent = `${i + 1}. ${bezirk}`;
-    const wert = document.createElement('span');
-    wert.className = 'abdeckung-wert';
-    wert.textContent = anzahl === 0 ? 'noch nichts' : String(anzahl);
-    kopf.append(name, wert);
-
-    const balken = document.createElement('div');
-    balken.className = 'abdeckung-balken';
-    const fuellung = document.createElement('div');
-    fuellung.className = 'abdeckung-fuellung';
-    fuellung.style.width = `${(anzahl / maximum) * 100}%`;
-    balken.appendChild(fuellung);
-
-    li.append(kopf, balken);
-    abdeckungListe.appendChild(li);
-  });
-
-  const ohne = proBezirk.get('(ohne Zuordnung)') || 0;
-  if (ohne > 0) {
-    const li = document.createElement('li');
-    li.className = 'abdeckung-zeile';
-    const kopf = document.createElement('div');
-    kopf.className = 'abdeckung-kopf';
-    const name = document.createElement('span');
-    name.textContent = 'ohne Bezirkszuordnung';
-    const wert = document.createElement('span');
-    wert.className = 'abdeckung-wert';
-    wert.textContent = String(ohne);
-    kopf.append(name, wert);
-    li.appendChild(kopf);
-    abdeckungListe.appendChild(li);
   }
 }
 
@@ -1451,7 +1386,17 @@ async function exportDateienBauen() {
         )
     );
 
-  return { csvBlob, csvFile, photoFiles, anzahl: entries.length };
+  return { csvBlob, csvFile, photoFiles, entries, anzahl: entries.length };
+}
+
+// Markiert Eintraege als versendet, nachdem sie auf einem anderen Weg als
+// dem Direktversand das Geraet erfolgreich verlassen haben (Teilen/
+// Herunterladen) -- sonst wuerden sie dauerhaft als "nicht gesendet"
+// gelten, obwohl die Daten laengst bei Jonathan angekommen sind.
+async function markiereVersendet(entries) {
+  for (const e of entries) {
+    if (!e.versendet) await putEntry({ ...e, versendet: true });
+  }
 }
 
 exportButton.addEventListener('click', async () => {
@@ -1460,7 +1405,7 @@ exportButton.addEventListener('click', async () => {
     showToast('Keine Beobachtungen gespeichert.', { variant: 'error' });
     return;
   }
-  const { csvBlob, csvFile, photoFiles } = paket;
+  const { csvBlob, csvFile, photoFiles, entries } = paket;
   const filesToShare = [csvFile, ...photoFiles];
 
   if (navigator.canShare && navigator.canShare({ files: filesToShare })) {
@@ -1469,7 +1414,7 @@ exportButton.addEventListener('click', async () => {
       // voran) nehmen bei gemischtem Aufruf den Text und lassen die Dateien
       // fallen: die Freigabe meldet Erfolg, im Chat kommt aber nur Text an.
       await navigator.share({ files: filesToShare });
-      merkeExport();
+      await markiereVersendet(entries);
       await renderList();
       // Web Share meldet auch dann Erfolg, wenn die Zielanwendung die
       // Dateien verworfen hat -- das laesst sich von hier aus nicht
@@ -1484,7 +1429,7 @@ exportButton.addEventListener('click', async () => {
 
   downloadBlob(csvBlob, csvFile.name);
   for (const f of photoFiles) downloadBlob(f, f.name);
-  merkeExport();
+  await markiereVersendet(entries);
   await renderList();
   showToast(`${filesToShare.length} Datei(en) heruntergeladen.`);
 });
@@ -1497,7 +1442,7 @@ downloadButton.addEventListener('click', async () => {
   }
   downloadBlob(paket.csvBlob, paket.csvFile.name);
   for (const f of paket.photoFiles) downloadBlob(f, f.name);
-  merkeExport();
+  await markiereVersendet(paket.entries);
   await renderList();
   showToast(`${1 + paket.photoFiles.length} Datei(en) heruntergeladen.`);
 });
@@ -1534,10 +1479,48 @@ async function direktsendenEintrag(entry) {
   }
 }
 
+// Ein einzelner Sendeversuch. Bei Erfolg wird der Eintrag als "versendet"
+// markiert -- das ist die Grundlage dafuer, dass sowohl das automatische
+// Senden beim Speichern als auch der manuelle Wiederholungsknopf niemals
+// eine bereits angekommene Beobachtung ein zweites Mal ins Sheet schreiben.
+async function sendeEinzeln(entry) {
+  try {
+    const ergebnis = await direktsendenEintrag(entry);
+    if (ergebnis && ergebnis.ok) {
+      await putEntry({ ...entry, versendet: true });
+      return { ok: true };
+    }
+    return { ok: false, reason: (ergebnis && ergebnis.reason) || 'unbekannt' };
+  } catch (err) {
+    console.warn('Direktversand fehlgeschlagen.', err);
+    return { ok: false, reason: err && err.name === 'AbortError' ? 'zeitueberschreitung' : 'netzwerkfehler' };
+  }
+}
+
+// Spiegelt den Knopftext/-zustand an der Zahl der noch nicht erfolgreich
+// gesendeten Eintraege -- macht sichtbar, ob ueberhaupt noch was zu tun ist,
+// ohne dass man erst reinklicken muss.
+function updateDirektsendenButton(entries) {
+  const offen = entries.filter((e) => !e.versendet).length;
+  if (offen === 0) {
+    direktsendenButton.disabled = true;
+    direktsendenButton.textContent = '✓ Alles gesendet';
+  } else {
+    direktsendenButton.disabled = false;
+    direktsendenButton.textContent = `🔄 ${offen} nicht gesendete erneut versuchen`;
+  }
+}
+
+// Manueller Wiederholungsknopf: schickt NUR Eintraege, die noch nicht als
+// "versendet" markiert sind (typischerweise, weil das automatische Senden
+// beim Speichern mangels Netz im Feld fehlgeschlagen ist). Sendet
+// absichtlich nicht alles erneut -- das wuerde bei jedem Klick Duplikate im
+// Sheet erzeugen, weil dort (anders als bei der CSV) niemand von Hand
+// dedupliziert.
 direktsendenButton.addEventListener('click', async () => {
-  const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
+  const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id) && !e.versendet);
   if (entries.length === 0) {
-    showToast('Keine Beobachtungen gespeichert.', { variant: 'error' });
+    showToast('Nichts offen — alles schon gesendet.');
     return;
   }
 
@@ -1550,39 +1533,28 @@ direktsendenButton.addEventListener('click', async () => {
 
   for (let i = 0; i < entries.length; i++) {
     direktsendenStatus.textContent = `Sende ${i + 1} / ${entries.length} …`;
-    try {
-      const ergebnis = await direktsendenEintrag(entries[i]);
-      if (ergebnis && ergebnis.ok) {
-        erfolge++;
-      } else if (ergebnis && ergebnis.reason === 'limit_exceeded') {
-        abbruchGrund = 'Tageslimit erreicht';
-        break;
-      } else {
-        abbruchGrund = `Serverfehler (${(ergebnis && ergebnis.reason) || 'unbekannt'})`;
-        break;
-      }
-    } catch (err) {
-      console.warn('Direktversand fehlgeschlagen.', err);
-      abbruchGrund = err && err.name === 'AbortError' ? 'Zeitüberschreitung' : 'Netzwerkfehler';
+    const ergebnis = await sendeEinzeln(entries[i]);
+    if (ergebnis.ok) {
+      erfolge++;
+    } else {
+      abbruchGrund = ergebnis.reason === 'limit_exceeded' ? 'Tageslimit erreicht' : `Fehler (${ergebnis.reason})`;
       break;
     }
   }
 
-  direktsendenButton.disabled = false;
+  await renderList(); // setzt den Knopftext/-zustand ueber updateDirektsendenButton() neu
 
   if (erfolge === entries.length) {
     direktsendenStatus.hidden = true;
-    merkeExport();
-    await renderList();
-    showToast(`✓ ${erfolge} ${erfolge === 1 ? 'Beobachtung' : 'Beobachtungen'} direkt gesendet.`);
+    showToast(`✓ ${erfolge} ${erfolge === 1 ? 'Beobachtung' : 'Beobachtungen'} nachgesendet.`);
     return;
   }
 
   const rest = entries.length - erfolge;
   direktsendenStatus.textContent =
     `${erfolge} von ${entries.length} gesendet. ${abbruchGrund ? abbruchGrund + ' — ' : ''}` +
-    `Restliche ${rest} bitte über „Teilen" oder „Herunterladen" senden.`;
-  showToast('Direktsenden unvollständig — siehe Hinweis unten.', { variant: 'error', durationMs: 5000 });
+    `Restliche ${rest} bitte über „Weitere Optionen" (Teilen/Herunterladen) senden.`;
+  showToast('Nachsenden unvollständig — siehe Hinweis unten.', { variant: 'error', durationMs: 5000 });
 });
 
 // GeoJSON: oeffnet sich in praktisch jeder Kartenanwendung (Organic Maps,
@@ -1618,7 +1590,7 @@ geojsonButton.addEventListener('click', async () => {
   showToast(`${entries.length} Orte als GeoJSON exportiert.`);
 });
 
-exportReminderButton.addEventListener('click', () => exportButton.click());
+exportReminderButton.addEventListener('click', () => direktsendenButton.click());
 
 // "Alle löschen": zweiter Tap zur Bestätigung statt native confirm(), danach
 // ebenfalls per Undo-Toast rueckgaengig machbar (Snapshot vorher im Speicher).

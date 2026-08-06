@@ -115,16 +115,6 @@ body {
   flex-shrink: 0;
 }
 
-.header-badge {
-  flex-shrink: 0;
-  background: var(--accent);
-  color: white;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 0.3rem 0.6rem;
-  border-radius: 999px;
-}
-
 .icon-button {
   width: auto;
   min-height: unset;
@@ -169,45 +159,24 @@ body {
   color: var(--warn-text);
 }
 
-/* Abdeckung nach Stadtbezirk */
-.abdeckung-liste {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
+/* Fallback-Export-Optionen (Teilen/Herunterladen/GeoJSON): bewusst
+   eingeklappt, weil der Direktversand-Knopf der primaere Weg ist -- siehe
+   Versand-Sektion in index.html. */
+.fallback-details {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
 }
 
-.abdeckung-kopf {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.82rem;
-  margin-bottom: 0.25rem;
-}
-
-.abdeckung-wert {
+.fallback-details summary {
+  cursor: pointer;
+  font-size: 0.85rem;
   color: var(--text-muted);
-  white-space: nowrap;
+  padding: 0.25rem 0;
 }
 
-.abdeckung-zeile.leer .abdeckung-kopf {
-  color: var(--text-muted);
-}
-
-.abdeckung-balken {
-  height: 6px;
-  background: var(--surface-alt);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.abdeckung-fuellung {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 999px;
-  transition: width 0.3s ease;
+.fallback-details[open] summary {
+  margin-bottom: 0.5rem;
 }
 
 .btn-block {
