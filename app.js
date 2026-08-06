@@ -450,11 +450,17 @@ const ENTWURF_FELDER = [
 let entwurfTimer = null;
 
 function entwurfSpeichern() {
-  if (editingId) return; // beim Bearbeiten keinen Entwurf ueberschreiben
-  const daten = { chips: { ...chipState }, position: currentPosition };
+  // Auch waehrend einer Bearbeitung sichern: sonst waeren Korrekturen an
+  // bestehenden Eintraegen als einziger Eingabeweg ungeschuetzt gegen
+  // Absturz oder geschlossene App. editingId wandert mit in den Entwurf,
+  // damit beim Wiederherstellen klar ist, WAS bearbeitet wurde.
+  const daten = { chips: { ...chipState }, position: currentPosition, editingId };
   for (const [key, el] of ENTWURF_FELDER) daten[key] = el().value;
 
+  // Eine laufende Bearbeitung ist nie "leer" -- sie muss auch dann gesichert
+  // werden, wenn der Nutzer gerade alle Felder geleert hat.
   const leer =
+    !editingId &&
     !daten.ort_name.trim() &&
     !daten.adresse.trim() &&
     !daten.notiz.trim() &&
@@ -485,7 +491,7 @@ function entwurfLoeschen() {
   entwurfHinweis.hidden = true;
 }
 
-function entwurfWiederherstellen() {
+async function entwurfWiederherstellen() {
   let daten;
   try {
     daten = JSON.parse(localStorage.getItem(LS_ENTWURF) || 'null');
@@ -493,6 +499,20 @@ function entwurfWiederherstellen() {
     return;
   }
   if (!daten) return;
+
+  // War eine Bearbeitung offen, erst den Modus wiederherstellen -- sonst
+  // wuerde das Speichern einen NEUEN Eintrag anlegen statt den alten zu
+  // ueberschreiben, und der urspruengliche bliebe unveraendert stehen.
+  if (daten.editingId) {
+    const original = (await getAllEntries()).find((e) => e.id === daten.editingId);
+    if (original) {
+      bearbeitungsModusSetzen(original);
+    } else {
+      // Eintrag existiert nicht mehr (zwischenzeitlich geloescht). Der
+      // Entwurf wird dann als neue Beobachtung weitergefuehrt.
+      console.warn('Bearbeiteter Eintrag nicht mehr vorhanden, Entwurf gilt als neu.');
+    }
+  }
 
   for (const [key, , setzen] of ENTWURF_FELDER) {
     if (typeof daten[key] === 'string') setzen(daten[key]);
@@ -574,7 +594,7 @@ function updateExportReminder(entries) {
 
 // ---------- Init ----------
 
-function init() {
+async function init() {
   datumInput.value = todayIso();
   uhrzeitInput.value = nowHm();
   for (const bezirk of STADTBEZIRKE) {
@@ -585,9 +605,12 @@ function init() {
   }
   themeAnwenden(localStorage.getItem(LS_THEME));
   setupChipGroups();
-  entwurfWiederherstellen();
+  // Erst der Entwurf, dann die Liste: die Wiederherstellung liest die
+  // Datenbank (fuer eine offene Bearbeitung) und soll sich nicht mit
+  // renderList um dieselbe Verbindung schlagen.
+  await entwurfWiederherstellen();
   setupEntwurfAutosave();
-  renderList();
+  await renderList();
   registerServiceWorker();
   ensurePersistentStorage();
 }
@@ -1040,6 +1063,10 @@ function weitereAmSelbenOrt(gemerkt) {
     showMap(currentPosition.lat, currentPosition.lon);
   }
   bereichInput.focus();
+  // Programmatisch gesetzte Werte loesen keine input-Events aus, der
+  // Entwurf wuerde also erst beim ersten Tippen gesichert. Wer die App
+  // vorher schliesst, verliert Ort, Adresse und GPS der Folgeerfassung.
+  entwurfSpeichern();
   showToast('Ort übernommen — jetzt Bereich/Stockwerk angeben.', { durationMs: 3500 });
 }
 
@@ -1057,13 +1084,42 @@ function formularZuruecksetzen() {
   currentPosition = null;
   currentFotoBlob = null;
   bearbeitungBeenden();
+  // Muss mit: sonst bliebe nach "Abbrechen" ein Entwurf mit editingId
+  // liegen und die abgebrochene Bearbeitung kaeme beim naechsten Start
+  // wieder hoch.
+  entwurfLoeschen();
 }
 
 // ---------- Bearbeiten ----------
 
-function bearbeitungStarten(entry) {
+// Nur der Modus: Zustand, Foto-Uebernahme und Bedienoberflaeche. Getrennt
+// vom Befuellen, weil die Entwurfs-Wiederherstellung den Modus braucht,
+// die Feldwerte aber aus dem Entwurf nimmt -- nicht aus dem Original.
+function bearbeitungsModusSetzen(entry) {
   editingId = entry.id;
   editingFoto = entry.foto || null;
+
+  // Ein Foto, das fuer den vorigen (noch nicht gespeicherten) Eintrag
+  // gewaehlt war, muss weg. Sonst gilt beim Speichern
+  // `currentFotoBlob || editingFoto` und das alte Foto landet still am
+  // bearbeiteten Eintrag -- ohne dass die Vorschau es je zeigt.
+  currentFotoBlob = null;
+  fotoInput.value = '';
+
+  if (entry.foto) {
+    fotoPreview.src = URL.createObjectURL(entry.foto);
+    fotoPreview.hidden = false;
+  } else {
+    fotoPreview.hidden = true;
+  }
+
+  editHinweisText.textContent = `„${entry.ort_name}" wird bearbeitet.`;
+  editHinweis.hidden = false;
+  submitButton.textContent = '💾 Änderungen speichern';
+}
+
+function bearbeitungStarten(entry) {
+  bearbeitungsModusSetzen(entry);
 
   datumInput.value = entry.datum || todayIso();
   uhrzeitInput.value = entry.uhrzeit || '';
@@ -1091,17 +1147,10 @@ function bearbeitungStarten(entry) {
     gpsStatus.textContent = 'Noch kein Standort erfasst.';
   }
 
-  if (entry.foto) {
-    fotoPreview.src = URL.createObjectURL(entry.foto);
-    fotoPreview.hidden = false;
-  } else {
-    fotoPreview.hidden = true;
-  }
-
-  editHinweisText.textContent = `„${entry.ort_name}" wird bearbeitet.`;
-  editHinweis.hidden = false;
+  // Foto-Vorschau, Hinweis und Buttontext setzt bereits
+  // bearbeitungsModusSetzen().
   entwurfHinweis.hidden = true;
-  submitButton.textContent = '💾 Änderungen speichern';
+  entwurfSpeichern(); // Bearbeitung ab sofort gegen Abstuerze sichern
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -1282,6 +1331,12 @@ function renderAbdeckung(entries) {
 // Undo-Frist wirklich aus IndexedDB loeschen -- ersetzt den blockierenden
 // confirm()-Dialog durch einen Rueckgaengig-Toast.
 function softDeleteEntry(entry) {
+  // renderList() laeuft asynchron (IndexedDB), der Loeschknopf bleibt also
+  // kurz klickbar. Ein zweiter Tap wuerde die Timer-Referenz ueberschreiben;
+  // der erste Timer liefe verwaist weiter und loeschte endgueltig, obwohl
+  // der sichtbare Undo-Toast nur den zweiten kennt.
+  if (pendingDeletes.has(entry.id)) return;
+
   const timeoutId = setTimeout(async () => {
     pendingDeletes.delete(entry.id);
     await deleteEntry(entry.id);
@@ -1345,13 +1400,21 @@ async function exportDateienBauen() {
   const csvBlob = new Blob(['\uFEFF' + csvText], { type: 'text/csv;charset=utf-8' });
   const csvFile = new File([csvBlob], `beobachtungen-${todayIso()}.csv`, { type: 'text/csv' });
 
+  // Dateiname muss eindeutig sein: Zwei Wickelmoeglichkeiten am selben Ort
+  // am selben Tag (genau der "+ Weitere hier"-Fall) ergaeben sonst zweimal
+  // denselben Namen. Beim Teilen wuerde eine der Dateien je nach Zielapp
+  // still verworfen. Bereich und id-Suffix machen ihn eindeutig.
   const photoFiles = entries
     .filter((e) => e.foto)
     .map(
       (e) =>
-        new File([e.foto], `${e.datum}_${slugify(e.ort_name)}.jpg`, {
-          type: e.fotoType || 'image/jpeg',
-        })
+        new File(
+          [e.foto],
+          [e.datum, slugify(e.ort_name), e.bereich ? slugify(e.bereich) : '', String(e.id).slice(-6)]
+            .filter(Boolean)
+            .join('_') + '.jpg',
+          { type: e.fotoType || 'image/jpeg' }
+        )
     );
 
   return { csvBlob, csvFile, photoFiles, anzahl: entries.length };
@@ -1460,7 +1523,11 @@ clearButton.addEventListener('click', async () => {
   clearArmed = false;
   clearButton.textContent = CLEAR_BUTTON_TEXT;
 
-  const snapshot = await getAllEntries();
+  // Einzeln geloeschte Eintraege liegen bis zum Ablauf ihrer Undo-Frist noch
+  // in IndexedDB, gelten aber als geloescht. Sie duerfen NICHT in den
+  // Snapshot -- sonst holte ein "Rueckgaengig" der Sammelloeschung Eintraege
+  // zurueck, die der Nutzer vorher bewusst einzeln entfernt hat.
+  const snapshot = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
   if (snapshot.length === 0) return;
   // Erst die schwebenden Einzel-Timer entschaerfen, dann loeschen -- sonst
   // wuerde ein zurueckgeholter Eintrag Sekunden spaeter erneut verschwinden.
@@ -1490,4 +1557,5 @@ function registerServiceWorker() {
   });
 }
 
-init();
+
+init().catch((err) => console.error('Initialisierung fehlgeschlagen.', err));
