@@ -1,0 +1,44 @@
+name: pages
+
+# Ersetzt den Legacy-Jekyll-Build von GitHub Pages. Der ist bei diesem
+# Repo zweimal hintereinander mit "Page build failed" und duration 0
+# gescheitert, ohne erkennbare Ursache und ohne Logs. Ueber Actions gibt
+# es im Fehlerfall echte Ausgaben.
+#
+# Die Seite ist reines statisches Vanilla-HTML -- es wird nichts gebaut,
+# nur hochgeladen.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Laufende Deploys nicht abbrechen, aber auch nicht stapeln.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      # Das ganze Repo-Root ausliefern. .github/ und .git/ nimmt die
+      # Action ohnehin nicht mit.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
