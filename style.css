@@ -548,6 +548,12 @@ button:active {
   font-size: 0.75rem;
 }
 
+.build-info {
+  margin: 0.4rem 0 0;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Toast */
 .toast {
   position: fixed;

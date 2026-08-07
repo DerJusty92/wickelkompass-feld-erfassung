@@ -12,6 +12,12 @@
  * gehoert hierher -- und wird getestet.
  */
 
+// Sichtbare Build-Kennung (Fusszeile). Zweck: auf dem Handy sofort ablesen,
+// ob wirklich der neueste Stand laeuft -- iOS-PWA-Updates sind zaeh. MUSS bei
+// jedem Deploy mit der CACHE-Version im service-worker.js im Gleichschritt
+// hochgezaehlt werden (kein Build-Schritt haelt das automatisch synchron).
+export const BUILD = 'v14';
+
 // Gemeinsamer Feldkatalog fuer CSV-Export UND Direktversand -- eine
 // Aenderung hier zieht automatisch beide Wege nach. Muss mit FELDER in
 // google-apps-script/Code.gs uebereinstimmen (kein Build-Schritt haelt das

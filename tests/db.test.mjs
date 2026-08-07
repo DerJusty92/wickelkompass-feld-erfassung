@@ -7,7 +7,7 @@
 // beweisen laesst.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createDb } from '../db.js';
+import { createDb, istIndexedDbSchreibbar } from '../db.js';
 
 function benannterFehler(name, message = name) {
   const e = new Error(message);
@@ -83,6 +83,9 @@ function makeFakeIdb({ outcomes = [], data = [] } = {}) {
       const req = { result: db, error: null, onupgradeneeded: null, onsuccess: null, onerror: null };
       queueMicrotask(() => req.onsuccess && req.onsuccess());
       return req;
+    },
+    deleteDatabase() {
+      /* no-op im Test */
     },
   };
 
@@ -196,4 +199,24 @@ test('getAllEntries: ohne veraltete Werte wird nichts zurueckgeschrieben', async
   const db = makeDb(fake);
   await db.getAllEntries();
   assert.equal(fake.zaehler.readwrite, 0);
+});
+
+test('istIndexedDbSchreibbar: true, wenn die Probe-Transaktion durchlaeuft', async () => {
+  const fake = makeFakeIdb({ outcomes: [{ complete: undefined }] });
+  assert.equal(await istIndexedDbSchreibbar({ indexedDB: fake.indexedDB }), true);
+});
+
+test('istIndexedDbSchreibbar: false bei Abbruch (z. B. iOS-Privatmodus)', async () => {
+  const fake = makeFakeIdb({ outcomes: [{ abort: benannterFehler('UnknownError') }] });
+  assert.equal(await istIndexedDbSchreibbar({ indexedDB: fake.indexedDB }), false);
+});
+
+test('istIndexedDbSchreibbar: false, wenn open() synchron wirft, ohne selbst zu werfen', async () => {
+  const kaputt = {
+    open() {
+      throw new Error('kein IndexedDB');
+    },
+    deleteDatabase() {},
+  };
+  assert.equal(await istIndexedDbSchreibbar({ indexedDB: kaputt }), false);
 });

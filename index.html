@@ -28,6 +28,8 @@
 </header>
 
 <main>
+  <p id="speicher-gesperrt" class="form-error" role="alert" hidden></p>
+
   <div id="export-reminder" class="export-reminder" role="status" hidden>
     <span id="export-reminder-text"></span>
     <button type="button" id="export-reminder-button" class="reminder-action">Jetzt senden</button>
@@ -245,6 +247,7 @@
     oder den optionalen GPS-Abgleichen (nur Koordinaten, an OpenStreetMap
     Nominatim/Overpass). Kein automatischer Versand.
   </p>
+  <p class="build-info">Build <span id="app-version"></span></p>
 </footer>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

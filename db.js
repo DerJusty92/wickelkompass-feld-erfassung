@@ -161,3 +161,57 @@ export function createDb({ indexedDB, dbName, dbVersion, store, retryDelayMs = 1
 
   return { openDb, schreibeMitRetry, addEntry, deleteEntry, putEntry, clearAllEntries, getAllEntries };
 }
+
+// Einmaliger Selbsttest, ob IndexedDB in diesem Browser wirklich SCHREIBBAR
+// ist. Auf iOS Safari im privaten Modus laesst sich die DB zwar oeffnen, aber
+// jede Schreib-Transaktion scheitert dauerhaft mit UnknownError -- das kann
+// schreibeMitRetry NICHT auffangen (nicht transient, der zweite Versuch
+// scheitert identisch). Deshalb hier VOR dem ersten echten Speichern pruefen
+// und den Nutzer warnen, statt ihn ins Leere speichern zu lassen.
+//
+// Bewusst gegen eine eigene Wegwerf-DB, nicht gegen den echten Store: so
+// bleibt der Datenbestand unberuehrt und es kann kein Testeintrag
+// zurueckbleiben. Gibt true/false zurueck und wirft nie.
+export function istIndexedDbSchreibbar({ indexedDB, testDbName = 'wk-schreibtest', store = 'probe' }) {
+  return new Promise((resolve) => {
+    let db = null;
+    const fertig = (ergebnis) => {
+      try {
+        if (db) db.close();
+      } catch {
+        // egal
+      }
+      try {
+        indexedDB.deleteDatabase(testDbName); // best effort aufraeumen
+      } catch {
+        // egal
+      }
+      resolve(ergebnis);
+    };
+
+    let req;
+    try {
+      req = indexedDB.open(testDbName, 1);
+    } catch {
+      resolve(false);
+      return;
+    }
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains(store)) d.createObjectStore(store, { keyPath: 'id' });
+    };
+    req.onsuccess = () => {
+      db = req.result;
+      try {
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put({ id: 'probe' });
+        tx.oncomplete = () => fertig(true);
+        tx.onerror = () => fertig(false);
+        tx.onabort = () => fertig(false);
+      } catch {
+        fertig(false);
+      }
+    };
+    req.onerror = () => fertig(false);
+  });
+}
