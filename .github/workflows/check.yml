@@ -23,10 +23,15 @@ jobs:
       # Tippfehler, die sonst erst auf dem Handy als weisse Seite auffallen.
       - name: JS-Syntax pruefen
         run: |
-          for f in app.js service-worker.js dev-server.mjs generate-icons.mjs; do
+          for f in app.js core.js service-worker.js dev-server.mjs generate-icons.mjs; do
             node --check "$f"
             echo "OK: $f"
           done
+
+      # Unit-Tests der reinen Kernlogik (core.js) mit dem eingebauten
+      # node:test-Runner -- kein Framework, keine Abhaengigkeiten, kein Build.
+      - name: Kernlogik testen
+        run: node --test 'tests/**/*.test.mjs'
 
       # Die Cache-Version muss bei jeder Aenderung am App-Shell hochgezaehlt
       # werden, sonst behalten installierte Instanzen die alte Fassung.

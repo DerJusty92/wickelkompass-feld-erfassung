@@ -14,44 +14,37 @@
  * -- rein privates Erfassungswerkzeug fuer die Vorbereitungsphase.
  */
 
+// Reine, DOM-/IDB-freie Kernlogik und geteilte Konstanten -- dieselbe
+// Datei nutzen die Tests (tests/*.test.mjs). app.js ist deshalb ein
+// ES-Modul (siehe index.html: <script type="module">).
+import {
+  EXPORT_HEADER,
+  todayIso,
+  nowHm,
+  baueCsvText,
+  slugify,
+  guessBezirk,
+  distanceMeters,
+  findeDuplikate,
+  migriereEintrag,
+  offeneEintraege,
+  klassifiziereSendeAntwort,
+  klassifiziereSendeFehler,
+  berechneErinnerung,
+} from './core.js';
+
 const DB_NAME = 'wk-feld-erfassung';
 const DB_VERSION = 1;
 const STORE = 'beobachtungen';
-const DUPLIKAT_RADIUS_M = 30;
 const UNDO_FRIST_MS = 5000;
 const CLEAR_UNDO_MS = 9000;
-
-// Export-Erinnerung. Die Daten liegen in genau einer Browser-Datenbank auf
-// genau einem Geraet; der Export ist die einzige Sicherung. Schwellen
-// bewusst niedrig -- lieber einmal zu oft erinnert als eine Safari verloren.
-const ERINNERUNG_EINTRAEGE = 10;
-const ERINNERUNG_TAGE = 7;
 const LS_ENTWURF = 'wk-entwurf';
 const LS_THEME = 'wk-theme';
 
-// Gemeinsamer Feldkatalog fuer CSV-Export UND Direktversand -- eine
-// Aenderung hier zieht automatisch beide Wege nach. Muss mit FELDER in
-// google-apps-script/Code.gs uebereinstimmen (kein Build-Schritt haelt das
-// automatisch synchron, siehe Kommentar dort).
-const EXPORT_HEADER = [
-  'datum',
-  'ort_name',
-  'adresse',
-  'stadtbezirk',
-  'changing_table',
-  'changing_table_location',
-  'stroller_access',
-  'notiz',
-  'quelle',
-  'lat',
-  'lon',
-  'google_maps_link',
-  'uhrzeit',
-  'zugang',
-  'kostenpflichtig',
-  'zustand',
-  'bereich',
-];
+// EXPORT_HEADER (Feldkatalog fuer CSV UND Direktversand) liegt jetzt in
+// core.js -- eine Aenderung dort zieht beide Wege nach. Muss weiterhin mit
+// FELDER in google-apps-script/Code.gs uebereinstimmen (kein Build-Schritt
+// haelt das synchron, siehe Kommentar dort).
 
 // Direktversand an Jonathan statt Mail/WhatsApp (siehe
 // google-apps-script/README.md). Die URL und das Secret sind bewusst
@@ -74,20 +67,7 @@ const STADTBEZIRKE = [
   'Pasing, Bogenhausen, Giesing',
 ];
 
-// Offizielle Muenchner Stadtbezirke (Nominatim liefert i. d. R. diese Namen
-// in address.suburb / address.city_district) -> Hypothese-Gruppen aus
-// docs/erhebung/stadtteil-priorisierung.md. Nicht erfasste Bezirke (z. B.
-// Moosach, Laim, Hadern) bleiben ohne Vorschlag -- dann waehlt man selbst.
-const BEZIRK_MAPPING = [
-  { match: ['altstadt-lehel', 'altstadt', 'lehel'], bucket: 'Altstadt/Lehel' },
-  { match: ['ludwigsvorstadt', 'isarvorstadt'], bucket: 'Ludwigsvorstadt/Isarvorstadt' },
-  { match: ['maxvorstadt', 'schwabing'], bucket: 'Maxvorstadt/Schwabing' },
-  { match: ['au-haidhausen', 'haidhausen'], bucket: 'Haidhausen/Au' },
-  { match: ['berg am laim', 'ramersdorf', 'perlach'], bucket: 'Ramersdorf/Berg am Laim' },
-  { match: ['sendling', 'westend', 'schwanthalerhöhe', 'schwanthalerhoehe'], bucket: 'Sendling/Westend' },
-  { match: ['neuhausen', 'nymphenburg'], bucket: 'Neuhausen/Nymphenburg' },
-  { match: ['pasing', 'obermenzing', 'bogenhausen', 'giesing'], bucket: 'Pasing, Bogenhausen, Giesing' },
-];
+// BEZIRK_MAPPING liegt jetzt in core.js (guessBezirk zieht es mit).
 
 // ---------- IndexedDB ----------
 
@@ -127,33 +107,86 @@ function openDb() {
   return dbPromise;
 }
 
-async function addEntry(entry) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).add(entry);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
+// Fehler, bei denen ein zweiter Versuch garantiert identisch scheitert: der
+// Speicher bleibt voll (Quota), der Schluessel bleibt belegt (Constraint),
+// die Daten bleiben unklonbar (DataClone) usw. Solche Fehler sofort
+// durchreichen -- der Retry unten ist NUR fuer transiente WebKit-Abbrueche
+// gedacht, und ein sofortiges Durchreichen laesst z. B. die Quota-
+// Sonderbehandlung im Submit-Handler ohne 150-ms-Umweg greifen.
+const NICHT_WIEDERHOLBAR = new Set([
+  'QuotaExceededError',
+  'ConstraintError',
+  'DataCloneError',
+  'DataError',
+  'VersionError',
+]);
 
-// Wertumbenennungen. Am 05.08.2026 wurde 'unisex' auf die OSM-Schreibweise
-// 'unisex_toilet' umgestellt. Eintraege, die vorher auf einem Geraet
-// erfasst wurden, wuerden sonst mit einem Wert exportiert, den weder der
-// Erhebungsbogen noch OSM kennt -- still und unbemerkt.
-const WERT_MIGRATION = { changing_table_location: { unisex: 'unisex_toilet' } };
-
-function migriereEintrag(entry) {
-  let geaendert = false;
-  for (const [feld, abbildung] of Object.entries(WERT_MIGRATION)) {
-    const alt = entry[feld];
-    if (alt && abbildung[alt]) {
-      entry[feld] = abbildung[alt];
-      geaendert = true;
+// Zentraler Schreibpfad fuer alle readwrite-Operationen.
+//
+// Drei Haerten gegen genau das, was auf iOS Safari (WebKit) in der Praxis
+// auftritt und sonst als nichtssagendes "Speichern fehlgeschlagen
+// (unbekannter Fehler)" beim Nutzer landet:
+//
+// 1. Aussagekraeftiger Fehler: WebKit bricht Transaktionen gelegentlich ab,
+//    ohne tx.error zu setzen (dann war die Meldung leer). Wir greifen der
+//    Reihe nach tx.error, den Request-Fehler und zuletzt einen benannten
+//    Fallback ab (name 'TransaktionAbgebrochen', damit die UI-Meldung nicht
+//    beim generischen 'Error' landet) -- und fangen synchrone Fehler (z. B.
+//    DataCloneError beim add) separat, weil die sonst gar nicht im
+//    Promise-Reject landen.
+// 2. Ein Wiederholungsversuch: WebKit schliesst IndexedDB-Verbindungen beim
+//    Backgrounding und liefert transiente UnknownErrors -- ein zweiter
+//    Versuch auf einer frisch geoeffneten Verbindung klappt dann meist.
+// 3. Fail-fast bei Dauerfehlern (NICHT_WIEDERHOLBAR): kein sinnloser zweiter
+//    Schreibversuch, wenn der erste aus strukturellem Grund scheiterte.
+async function schreibeMitRetry(operation) {
+  let letzterFehler = null;
+  for (let versuch = 0; versuch < 2; versuch++) {
+    try {
+      const db = await openDb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        let request;
+        try {
+          request = operation(tx.objectStore(STORE));
+        } catch (syncErr) {
+          // z. B. DataCloneError: add()/put() wirft schon synchron.
+          reject(syncErr);
+          return;
+        }
+        const fehler = () => {
+          const abbruch = new Error('IndexedDB-Transaktion abgebrochen');
+          abbruch.name = 'TransaktionAbgebrochen';
+          reject(tx.error || (request && request.error) || abbruch);
+        };
+        tx.oncomplete = () => resolve(request && request.result);
+        tx.onerror = fehler;
+        tx.onabort = fehler;
+      });
+    } catch (err) {
+      letzterFehler = err;
+      // Strukturelle Fehler nicht wiederholen -- der zweite Versuch scheiterte
+      // identisch, nur 150 ms spaeter. Sofort durchreichen.
+      if (err && NICHT_WIEDERHOLBAR.has(err.name)) throw err;
+      // Verbindung koennte tot sein (iOS schliesst sie beim Backgrounding).
+      // Vor dem zweiten Versuch verwerfen, damit openDb() frisch oeffnet.
+      try {
+        if (dbPromise) (await dbPromise).close();
+      } catch {
+        // Schliessen einer bereits toten Verbindung ist egal.
+      }
+      dbPromise = null;
+      if (versuch === 0) await new Promise((r) => setTimeout(r, 150));
     }
   }
-  return geaendert;
+  throw letzterFehler;
 }
+
+async function addEntry(entry) {
+  return schreibeMitRetry((store) => store.add(entry));
+}
+
+// WERT_MIGRATION und migriereEintrag liegen jetzt in core.js.
 
 async function getAllEntries() {
   const db = await openDb();
@@ -178,80 +211,24 @@ async function getAllEntries() {
 }
 
 async function deleteEntry(id) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  return schreibeMitRetry((store) => store.delete(id));
 }
 
 // put statt add: legt an ODER ueberschreibt. Fuer das Bearbeiten -- add()
 // wuerde bei bestehender id mit ConstraintError abbrechen.
 async function putEntry(entry) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(entry);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  return schreibeMitRetry((store) => store.put(entry));
 }
 
 async function clearAllEntries() {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  return schreibeMitRetry((store) => store.clear());
 }
 
 // ---------- Hilfsfunktionen ----------
 
-function todayIso() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function nowHm() {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-function csvEscape(value) {
-  const s = String(value ?? '');
-  return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function slugify(text) {
-  return String(text || 'ort')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '')
-    .slice(0, 40) || 'ort';
-}
-
-function guessBezirk(address) {
-  const hay = Object.values(address || {}).join(' ').toLowerCase();
-  for (const { match, bucket } of BEZIRK_MAPPING) {
-    if (match.some((m) => hay.includes(m))) return bucket;
-  }
-  return null;
-}
-
-// Haversine-Distanz in Metern -- fuer Duplikat-Check und Umkreissuche.
-function distanceMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
+// todayIso, nowHm, csvEscape, slugify, guessBezirk und distanceMeters liegen
+// jetzt in core.js (importiert oben) -- reine Funktionen, von den Tests
+// abgedeckt.
 
 // Fuer den Direktversand: der Apps-Script-Endpunkt bekommt Fotos als
 // Base64-String statt als rohe Datei im FormData -- ein rohes Datei-Feld
@@ -582,16 +559,8 @@ entwurfVerwerfen.addEventListener('click', () => {
 
 // ---------- Export-Erinnerung ----------
 
-// Die id beginnt mit Date.now() -- daraus laesst sich das Erfassungsdatum
-// ableiten, ohne einen separaten Zeitstempel mitzufuehren.
-function erstelltAm(entry) {
-  const ms = Number(String(entry.id).split('-')[0]);
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function tageSeit(ms) {
-  return Math.floor((Date.now() - ms) / 86400000);
-}
+// erstelltAm, tageSeit und die Schwellenlogik (berechneErinnerung) liegen
+// jetzt in core.js. updateExportReminder ist nur noch die DOM-Anbindung.
 
 // Seit es pro Eintrag ein echtes "versendet"-Flag gibt (automatisches
 // Senden beim Speichern, siehe sendeEinzeln()), ist die Erinnerung direkt
@@ -601,23 +570,12 @@ function tageSeit(ms) {
 // erfolgreich verschickte Eintraege ebenfalls als versendet (siehe
 // export-button/download-button), zaehlen also nicht mehr mit.
 function updateExportReminder(entries) {
-  const offen = entries.filter((e) => !e.versendet);
-
-  if (offen.length === 0) {
+  const { sichtbar, text } = berechneErinnerung(entries);
+  if (!sichtbar) {
     exportReminder.hidden = true;
     return;
   }
-
-  const tage = tageSeit(Math.min(...offen.map(erstelltAm)));
-
-  if (offen.length < ERINNERUNG_EINTRAEGE && tage < ERINNERUNG_TAGE) {
-    exportReminder.hidden = true;
-    return;
-  }
-
-  const wieViele = `${offen.length} ${offen.length === 1 ? 'Beobachtung' : 'Beobachtungen'}`;
-  const wannHer = tage === 0 ? 'von heute' : `seit ${tage} ${tage === 1 ? 'Tag' : 'Tagen'}`;
-  exportReminderText.textContent = `${wieViele} noch nicht gesendet (${wannHer}).`;
+  exportReminderText.textContent = text;
   exportReminder.hidden = false;
 }
 
@@ -744,12 +702,8 @@ function hideMap() {
 // Duplikat-Check: warnt, wenn der neue GPS-Punkt nah an einer bereits
 // gespeicherten Beobachtung liegt -- rein lokal, kein Netzwerk.
 async function checkDuplicates(lat, lon) {
-  const entries = await getAllEntries();
-  const treffer = entries
-    .filter((e) => e.lat && e.lon && !pendingDeletes.has(e.id))
-    .map((e) => ({ e, dist: distanceMeters(lat, lon, e.lat, e.lon) }))
-    .filter((x) => x.dist <= DUPLIKAT_RADIUS_M)
-    .sort((a, b) => a.dist - b.dist);
+  const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
+  const treffer = findeDuplikate(entries, lat, lon);
 
   if (treffer.length > 0) {
     const { e, dist } = treffer[0];
@@ -1358,11 +1312,7 @@ async function exportDateienBauen() {
   const entries = (await getAllEntries()).filter((e) => !pendingDeletes.has(e.id));
   if (entries.length === 0) return null;
 
-  const lines = [EXPORT_HEADER.join(';')];
-  for (const e of entries) {
-    lines.push(EXPORT_HEADER.map((key) => csvEscape(e[key])).join(';'));
-  }
-  const csvText = lines.join('\n') + '\n';
+  const csvText = baueCsvText(entries);
   // BOM voran, sonst zeigt Excel die Umlaute als Krautsalat. Wer die Zeilen
   // in docs/erhebung/beobachtungen.csv kopiert, bekommt es nicht mit --
   // erhebung-fortschritt.mjs im Hauptrepo entfernt es zur Sicherheit.
@@ -1485,15 +1435,13 @@ async function direktsendenEintrag(entry) {
 // eine bereits angekommene Beobachtung ein zweites Mal ins Sheet schreiben.
 async function sendeEinzeln(entry) {
   try {
-    const ergebnis = await direktsendenEintrag(entry);
-    if (ergebnis && ergebnis.ok) {
-      await putEntry({ ...entry, versendet: true });
-      return { ok: true };
-    }
-    return { ok: false, reason: (ergebnis && ergebnis.reason) || 'unbekannt' };
+    const antwort = await direktsendenEintrag(entry);
+    const ergebnis = klassifiziereSendeAntwort(antwort);
+    if (ergebnis.ok) await putEntry({ ...entry, versendet: true });
+    return ergebnis;
   } catch (err) {
     console.warn('Direktversand fehlgeschlagen.', err);
-    return { ok: false, reason: err && err.name === 'AbortError' ? 'zeitueberschreitung' : 'netzwerkfehler' };
+    return klassifiziereSendeFehler(err);
   }
 }
 
@@ -1501,7 +1449,7 @@ async function sendeEinzeln(entry) {
 // gesendeten Eintraege -- macht sichtbar, ob ueberhaupt noch was zu tun ist,
 // ohne dass man erst reinklicken muss.
 function updateDirektsendenButton(entries) {
-  const offen = entries.filter((e) => !e.versendet).length;
+  const offen = offeneEintraege(entries).length;
   if (offen === 0) {
     direktsendenButton.disabled = true;
     direktsendenButton.textContent = '✓ Alles gesendet';
