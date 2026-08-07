@@ -15,9 +15,10 @@
  * nach TIMEOUT_MS der Cache, die App startet also weiterhin offline.
  *
  * Versionsnummer im CACHE-Namen hochzaehlen, wenn sich App-Shell-Dateien
- * aendern -- dann werden alte Caches beim Aktivieren entfernt.
+ * aendern -- dann werden alte Caches beim Aktivieren entfernt. Im
+ * Gleichschritt BUILD in core.js mitziehen (die sichtbare Fusszeilen-Kennung).
  */
-const CACHE = 'wk-feld-erfassung-v13';
+const CACHE = 'wk-feld-erfassung-v14';
 const TIMEOUT_MS = 3000;
 
 const ASSETS = [

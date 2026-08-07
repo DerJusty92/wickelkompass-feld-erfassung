@@ -30,8 +30,9 @@ import {
   klassifiziereSendeAntwort,
   klassifiziereSendeFehler,
   berechneErinnerung,
+  BUILD,
 } from './core.js';
-import { createDb } from './db.js';
+import { createDb, istIndexedDbSchreibbar } from './db.js';
 
 const DB_NAME = 'wk-feld-erfassung';
 const DB_VERSION = 1;
@@ -153,6 +154,8 @@ const entwurfHinweis = document.getElementById('entwurf-hinweis');
 const entwurfVerwerfen = document.getElementById('entwurf-verwerfen');
 const submitButton = document.querySelector('#entry-form button[type="submit"]');
 const storageWarning = document.getElementById('storage-warning');
+const speicherGesperrt = document.getElementById('speicher-gesperrt');
+const appVersion = document.getElementById('app-version');
 const exportReminder = document.getElementById('export-reminder');
 const exportReminderText = document.getElementById('export-reminder-text');
 const exportReminderButton = document.getElementById('export-reminder-button');
@@ -439,6 +442,7 @@ function updateExportReminder(entries) {
 // ---------- Init ----------
 
 async function init() {
+  if (appVersion) appVersion.textContent = BUILD;
   datumInput.value = todayIso();
   uhrzeitInput.value = nowHm();
   for (const bezirk of STADTBEZIRKE) {
@@ -449,6 +453,7 @@ async function init() {
   }
   themeAnwenden(localStorage.getItem(LS_THEME));
   setupChipGroups();
+  pruefeSpeicherbar();
   // Erst der Entwurf, dann die Liste: die Wiederherstellung liest die
   // Datenbank (fuer eine offene Bearbeitung) und soll sich nicht mit
   // renderList um dieselbe Verbindung schlagen.
@@ -457,6 +462,27 @@ async function init() {
   await renderList();
   registerServiceWorker();
   ensurePersistentStorage();
+}
+
+// Frueh warnen, wenn IndexedDB nicht schreibbar ist -- typischer Fall: iOS
+// Safari im privaten Modus, wo jede Schreib-Transaktion dauerhaft mit
+// UnknownError scheitert (der Retry in db.js kann das NICHT auffangen).
+// Ohne diesen Hinweis wuerde jeder Speicherversuch erst nach dem Ausfuellen
+// mit einer roten Fehlermeldung enden und im Feld unbemerkt Daten kosten.
+// Bewusst nicht-blockierend: Falls der Selbsttest ein falsches Negativ
+// liefert, bleibt Speichern trotzdem moeglich -- der Hinweis erklaert nur.
+async function pruefeSpeicherbar() {
+  if (!speicherGesperrt) return;
+  try {
+    const schreibbar = await istIndexedDbSchreibbar({ indexedDB });
+    if (!schreibbar) {
+      speicherGesperrt.textContent =
+        '⚠ Speichern ist in diesem Browser gesperrt (privater Modus?). Beobachtungen können NICHT gesichert werden — bitte einen normalen Tab oder die installierte App nutzen.';
+      speicherGesperrt.hidden = false;
+    }
+  } catch (err) {
+    console.warn('Speicher-Selbsttest fehlgeschlagen.', err);
+  }
 }
 
 // Entwurf mitschreiben, damit ein Anruf oder ein leerer Akku mitten in der
