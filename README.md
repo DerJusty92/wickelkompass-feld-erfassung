@@ -50,6 +50,18 @@ eigenen erfassten Daten.** Drei getrennte Dinge:
 HTML/CSS/JS, kein Build-Schritt. Speichert in IndexedDB auf dem Gerät.
 Verlässt das Gerät nur beim expliziten Export.
 
+Der JavaScript-Teil ist in drei native ES-Module gegliedert (der Browser
+lädt sie direkt, ohne Bundler):
+
+- **`core.js`** — reine, DOM-/IndexedDB-freie Logik (CSV-Bau, Distanz/Duplikat,
+  Export-Erinnerung, Wertmigration, Versand-Klassifikation, geteilte
+  Konstanten wie `EXPORT_HEADER`). Von den Tests abgedeckt.
+- **`db.js`** — die IndexedDB-Schicht mit `schreibeMitRetry` (Härtung gegen
+  transiente iOS-Safari-Transaktionsabbrüche). `indexedDB` ist injizierbar,
+  damit die Schicht in Node gegen ein Double testbar ist.
+- **`app.js`** — die DOM-Anbindung (Formular, Liste, GPS, Versand-Buttons);
+  `<script type="module">` importiert `core.js` und `db.js`.
+
 ## Live
 
 **https://derjusty92.github.io/wickelkompass-feld-erfassung/**
@@ -65,6 +77,27 @@ node dev-server.mjs
 ```
 
 Dann `http://localhost:5050` öffnen.
+
+## Automatisierte Tests
+
+Kein Framework, keine Abhängigkeiten, kein Build — die reine Logik (`core.js`)
+und die IndexedDB-Schicht (`db.js`) werden mit dem in Node eingebauten
+`node:test`-Runner geprüft:
+
+```bash
+node --test 'tests/**/*.test.mjs'
+```
+
+Abgedeckt sind u. a. CSV-Bau und -Escaping, Distanz-/Duplikatprüfung,
+versendet-Tracking und Auto-Send-Fehlerpfade, die Export-Erinnerung, die
+Wertmigration sowie `schreibeMitRetry` (Retry-Recovery, Fail-fast bei
+strukturellen Fehlern, benannter Abbruch-Fehler) gegen ein handgeschriebenes
+IndexedDB-Double. DOM-gebundenes Verhalten (Formular, Rendering) ist bewusst
+nicht Teil der Unit-Tests — das würde einen DOM-Harness (und damit eine
+Abhängigkeit) erfordern.
+
+Die CI (`.github/workflows/check.yml`) ruft diese Tests bei jedem Push/PR mit
+auf, zusätzlich zur JS-Syntaxprüfung und den Service-Worker-Checks.
 
 ## Icons neu erzeugen
 
